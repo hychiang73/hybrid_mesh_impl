@@ -1,0 +1,20 @@
+config AK6E
+	tristate "AkiraNET 802.11ax with 6GHz wireless cards support"
+	depends on m
+	depends on MAC80211 && HAS_DMA
+	depends on CRC32
+	---help---
+	  This module adds support for wireless adapters based on
+	  AkiraNET IEEE 802.11ax chip.
+
+	  If you choose to build a module, it'll be called ak6e.
+config WLAN_VENDOR_AKIRANET
+	bool "AkiraNET devices"
+	default y
+	---help---
+	  If you have a wireless card belonging to this class, say Y.
+
+	  Note that the answer to this question doesn't directly affect the
+	  kernel: saying N will just cause the configurator to skip all the
+	  questions about these cards. If you say Y, you will be asked for
+	  your specific card in the following questions.
