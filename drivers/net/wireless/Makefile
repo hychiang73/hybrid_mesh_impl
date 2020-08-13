@@ -3,6 +3,7 @@
 # Makefile for the Linux Wireless network device drivers.
 #
 
+obj-$(CPTCFG_WLAN_VENDOR_AKIRANET) += akiranet/
 obj-$(CPTCFG_WLAN_VENDOR_ADMTEK) += admtek/
 obj-$(CPTCFG_WLAN_VENDOR_ATH) += ath/
 obj-$(CPTCFG_WLAN_VENDOR_ATMEL) += atmel/
