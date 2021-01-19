@@ -143,6 +143,7 @@ void br_hmc_net_info(struct sk_buff *skb)
     br_hmc_info("port->name = %s\n", port->dev->name);
 }
 
+/* Refer to br_dev_queue_push_xmit in br_forward.c */
 int br_hmc_forward(struct sk_buff *skb, struct net_bridge_hmc *hmc)
 {
     struct net_bridge *br;
@@ -157,32 +158,16 @@ int br_hmc_forward(struct sk_buff *skb, struct net_bridge_hmc *hmc)
 
     br = netdev_priv(hmc_local_dev);
 
-    skb->dev = hmc_local_dev;
-
     rcu_read_lock();
 
     list_for_each_entry(p, &br->port_list, list) {
 
-        if (hmc->egress == HMC_PORT_FLOOD) {
-            pr_info("foward flooding\n");
-            br_forward(p, skb, true, false);
-            continue;
-        }
-
-        if (hmc->egress == HMC_PORT_PLC &&
-            (strncmp(p->dev->name, HMC_PLC_IFACE, strlen(HMC_PLC_IFACE)) == 0)) {
-            pr_info("forward to PLC\n");
-            br_forward(p, skb, true, false);
-            continue;
-        }
-
-        if (hmc->egress == HMC_PORT_WIFI &&
-            (strncmp(p->dev->name, HMC_WIFI_IFACE, strlen(HMC_WIFI_IFACE)) == 0)) {
-            pr_info("forward to WIFI\n");
-            //br_forward(p, skb, true, false);
+        if (hmc->egress == HMC_PORT_FLOOD ||
+            (hmc->egress == HMC_PORT_PLC && (strncmp(p->dev->name, HMC_PLC_IFACE, strlen(HMC_PLC_IFACE)) == 0)) ||
+            (hmc->egress == HMC_PORT_WIFI && (strncmp(p->dev->name, HMC_WIFI_IFACE, strlen(HMC_WIFI_IFACE)) == 0))) {
+            pr_info("Forward to %s iface\n", p->dev->name);
             skb->dev = p->dev;
             dev_queue_xmit(skb);
-            continue;
         }
     }
 
@@ -191,11 +176,15 @@ int br_hmc_forward(struct sk_buff *skb, struct net_bridge_hmc *hmc)
 }
 EXPORT_SYMBOL(br_hmc_forward);
 
+/* called by br_handle_frame in br_input.c */
 int br_hmc_rx_handler(struct sk_buff *skb)
 {
     struct net_bridge_hmc *hmc, *n;
 
     BR_TRACE();
+
+	br_hmc_print_skb(skb, "br_hmc_rx_handler", 0);
+	br_hmc_net_info(skb);
 
     list_for_each_entry_safe(hmc, n, &br_hmc.list, list) {
         if (hmc->ops->rx)
