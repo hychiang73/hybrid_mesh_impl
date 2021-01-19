@@ -6558,4 +6558,6 @@ u32 ieee80211_calc_tx_airtime(struct ieee80211_hw *hw,
  */
 bool ieee80211_set_hw_80211_encap(struct ieee80211_vif *vif, bool enable);
 
+void hmc_print_skb(struct sk_buff *skb, const char* type, int offset);
+
 #endif /* MAC80211_H */

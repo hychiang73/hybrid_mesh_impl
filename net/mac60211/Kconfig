@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config MAC60211
+	tristate "AkiraNET PLC proprietary network stack including mesh (mac60211)"
+	depends on m
+

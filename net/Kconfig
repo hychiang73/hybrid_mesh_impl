@@ -374,6 +374,8 @@ source "net/strparser/Kconfig"
 config FIB_RULES
 	bool
 
+source "net/mac60211/Kconfig"
+
 menuconfig WIRELESS
 	bool "Wireless"
 	depends on !S390

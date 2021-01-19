@@ -31,6 +31,7 @@
 #include "tkip.h"
 #include "wme.h"
 #include "rate.h"
+#include "mhmc.h"
 
 static inline void ieee80211_rx_stats(struct net_device *dev, u32 len)
 {
@@ -2670,8 +2671,10 @@ ieee80211_deliver_skb(struct ieee80211_rx_data *rx)
 #endif
 
 	if (skb) {
-		skb->protocol = eth_type_trans(skb, dev);
-		ieee80211_deliver_skb_to_local_stack(skb, rx);
+		if (mhmc_parse_before_deliver(skb) < 0) {
+			skb->protocol = eth_type_trans(skb, dev);
+			ieee80211_deliver_skb_to_local_stack(skb, rx);
+		}
 	}
 
 	if (xmit_skb) {

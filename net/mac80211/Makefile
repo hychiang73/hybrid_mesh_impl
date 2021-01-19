@@ -3,6 +3,7 @@ obj-$(CPTCFG_MAC80211) += mac80211.o
 
 # mac80211 objects
 mac80211-y := \
+	mhmc.o \
 	main.o status.o \
 	driver-ops.o \
 	sta_info.o \

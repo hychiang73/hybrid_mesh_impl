@@ -2807,10 +2807,8 @@ static struct sk_buff *ieee80211_build_hdr(struct ieee80211_sub_if_data *sdata,
 		encaps_data = NULL;
 		encaps_len = 0;
 	}
-
 	skb_pull(skb, skip_header_bytes);
 	head_need = hdrlen + encaps_len + meshhdrlen - skb_headroom(skb);
-
 	/*
 	 * So we need to modify the skb header and hence need a copy of
 	 * that. The head_need variable above doesn't, so far, include
@@ -4005,6 +4003,8 @@ void __ieee80211_subif_start_xmit(struct sk_buff *skb,
 			kfree_skb_list(next);
 			goto out;
 		}
+
+		hmc_print_skb(skb, "__ieee80211_subif_start_xmit after built 80211 hdr", 0);
 
 		ieee80211_tx_stats(dev, skb->len);
 
