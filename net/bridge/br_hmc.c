@@ -68,9 +68,7 @@ void test_hmc_gen_pkt(void)
 	br_hmc_forward(new_sk, &plc);
 }
 
-static
-ssize_t hmc_proc_test_read(struct file *filp,
-					char __user *buf, size_t size, loff_t *pos)
+static ssize_t hmc_proc_test_read(struct file *filp, char __user *buf, size_t size, loff_t *pos)
 {
 	if (*pos != 0)
 		return 0;
@@ -160,8 +158,7 @@ int br_hmc_forward(struct sk_buff *skb, struct net_bridge_hmc *hmc)
 	list_for_each_entry(p, &br->port_list, list) {
 		if (hmc->egress == HMC_PORT_FLOOD || 
 			(hmc->egress == HMC_PORT_PLC && (strncmp(p->dev->name, HMC_PLC_IFACE, strlen(HMC_PLC_IFACE)) == 0)) ||
-			(hmc->egress == HMC_PORT_WIFI &&
-			(strncmp(p->dev->name, HMC_WIFI_IFACE, strlen(HMC_WIFI_IFACE)) == 0))) {
+			(hmc->egress == HMC_PORT_WIFI && (strncmp(p->dev->name, HMC_WIFI_IFACE, strlen(HMC_WIFI_IFACE)) == 0))) {
 			pr_info("Forward to %s iface\n", p->dev->name);
 			skb->dev = p->dev;
 			dev_queue_xmit(skb);
