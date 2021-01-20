@@ -22,21 +22,20 @@ struct net_bridge_hmc_ops plc_br_hmc_ops = {
 
 static int plc_br_hmc_rx(struct sk_buff *skb)
 {
-    //hmc_info("*** BR-HMC PLC rx callback test***\n");
-    ak60211_rx_handler(skb); 
-   
-    return 0;
+    TRACE();
+    return ak60211_rx_handler(skb);
 }
 
 static int plc_br_hmc_alloc(void) 
 {
-    plc = br_hmc_alloc("PLC", &plc_br_hmc_ops);
+    plc = br_hmc_alloc(&plc_br_hmc_ops);
 
-    plc->egress = HMC_PORT_PLC;
     if (!plc) {
         pr_err("plc is null\n");
         return -ENOMEM;
     }
+
+    plc->egress = HMC_PORT_PLC;
 
     cf60211_get_dev(plc);
     return 0;
@@ -286,7 +285,7 @@ static void plc_proc_init(void)
     //hmc_info("beacon size:%ld, %ld, %ld, %ld", sizeof(struct beacon_packet), sizeof(struct plc_hdr), sizeof(struct meshidhdr), sizeof(struct meshconfhdr));
 }
 
-int plc_init(void)
+static int __init plc_init(void)
 {
     int ret = 0;
 
@@ -298,7 +297,7 @@ int plc_init(void)
     return ret;
 }
 
-void plc_deinit(void)
+static void __exit plc_deinit(void)
 {
     TRACE();
     remove_proc_entry("plc", proc_dir_plc);

@@ -10,6 +10,8 @@
  *	2 of the License, or (at your option) any later version.
  */
 
+#include <linux/slab.h>
+#include <linux/kernel.h>
 #include <net/arp.h>
 #include <net/ip.h>
 #include <linux/ieee80211.h>
@@ -17,6 +19,12 @@
 #include <linux/device.h>
 #include <linux/proc_fs.h>
 #include <linux/fs.h>
+#include <linux/netdevice.h>
+#include <linux/etherdevice.h>
+#include <linux/netfilter_bridge.h>
+#include <linux/neighbour.h>
+#include <linux/export.h>
+#include <linux/rculist.h>
 
 #include "br_private.h"
 #include "../mac80211/mhmc.h"
@@ -172,6 +180,7 @@ EXPORT_SYMBOL(br_hmc_forward);
 
 /* called by br_handle_frame in br_input.c */
 int br_hmc_rx_handler(struct sk_buff *skb)
+//int br_hmc_rx_handler(struct net *net, struct sock *sk, struct sk_buff *skb)
 {
 	struct net_bridge_hmc *hmc, *n;
 
@@ -181,14 +190,15 @@ int br_hmc_rx_handler(struct sk_buff *skb)
 	br_hmc_net_info(skb);
 
 	list_for_each_entry_safe(hmc, n, &br_hmc.list, list) {
-		if (hmc->ops->rx)
-			hmc->ops->rx(skb);
+		if (hmc->ops->rx) {
+			if (hmc->ops->rx(skb) < 0)
+				return -1;
+		}
 	}
-
 	return 0;
 }
 
-struct net_bridge_hmc *br_hmc_alloc(const char *name, struct net_bridge_hmc_ops *ops)
+struct net_bridge_hmc *br_hmc_alloc(struct net_bridge_hmc_ops *ops)
 {
 	struct net_bridge_hmc *hmc;
 

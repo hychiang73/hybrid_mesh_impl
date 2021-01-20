@@ -525,10 +525,12 @@ void br_hmc_print_skb(struct sk_buff *skb, const char* type, int offset);
 void br_hmc_gen_pkt(void);
 int br_hmc_forward(struct sk_buff *skb, struct net_bridge_hmc *hmc);
 int br_hmc_rx_handler(struct sk_buff *skb);
+//int br_hmc_rx_handler(struct net *net, struct sock *sk, struct sk_buff *skb);
 void br_hmc_net_info(struct sk_buff *skb);
 int br_hmc_forward(struct sk_buff *skb, struct net_bridge_hmc *hmc);
 void br_hmc_notify(int cmd, struct net_device *dev);
-struct net_bridge_hmc *br_hmc_alloc(const char *name, struct net_bridge_hmc_ops *ops);
+struct net_bridge_hmc *br_hmc_alloc(struct net_bridge_hmc_ops *ops);
+int br_hmc_pass_frame_up(struct sk_buff *skb);
 void br_hmc_dealloc(void);
 
 /* br_fdb.c */

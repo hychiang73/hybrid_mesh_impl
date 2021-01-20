@@ -261,8 +261,6 @@ rx_handler_result_t br_handle_frame(struct sk_buff **pskb)
 	const unsigned char *dest = eth_hdr(skb)->h_dest;
 	br_should_route_hook_t *rhook;
 
-	br_hmc_rx_handler(skb);
-
 	if (unlikely(skb->pkt_type == PACKET_LOOPBACK))
 		return RX_HANDLER_PASS;
 
@@ -274,6 +272,11 @@ rx_handler_result_t br_handle_frame(struct sk_buff **pskb)
 		return RX_HANDLER_CONSUMED;
 
 	p = br_port_get_rcu(skb->dev);
+
+	if (br_hmc_rx_handler(skb) < 0)
+		goto forward;
+	else
+		goto drop;
 
 	if (unlikely(is_link_local_ether_addr(dest))) {
 		u16 fwd_mask = p->br->group_fwd_mask_required;

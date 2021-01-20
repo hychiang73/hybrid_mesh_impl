@@ -269,8 +269,10 @@ struct ak60211_sta_info {
     u8      addr[6];
 };
 
-extern void ak60211_rx_handler(struct sk_buff *pskb);
+extern int ak60211_rx_handler(struct sk_buff *pskb);
 extern struct net_bridge_hmc *plc;
 extern void cf60211_get_dev(struct net_bridge_hmc *plc);
+
+/* rx.c */
 
 #endif /* MAC60211_H */

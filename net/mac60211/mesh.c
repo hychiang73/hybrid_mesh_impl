@@ -637,7 +637,7 @@ static void ak60211_mesh_bcn_presp(struct plc_packet_union *buff)
     ak60211_mesh_neighbour_update(buff);
 }
 
-void ak60211_rx_handler(struct sk_buff *pskb)
+int ak60211_rx_handler(struct sk_buff *pskb)
 {
     struct sk_buff *skb = pskb;
     struct plc_packet_union *plcbuff;
@@ -653,6 +653,10 @@ void ak60211_rx_handler(struct sk_buff *pskb)
     if ((!!memcmp(plcbuff->da, dev->br_addr, ETH_ALEN)) && !is_broadcast_ether_addr(plcbuff->da)) {
         goto drop;
     }
+
+    hmc_info("eth type = %x\n", htons(plcbuff->ethtype));
+    if (htons(plcbuff->ethtype) != 0xAA55)
+        goto drop;
 
     *(u16*)&fctl = plcbuff->plchdr.framectl;
 
@@ -683,6 +687,9 @@ void ak60211_rx_handler(struct sk_buff *pskb)
             }
             break;
     }
+
+    return 0;
+
 drop:
-    return;
+    return -1;
 }
