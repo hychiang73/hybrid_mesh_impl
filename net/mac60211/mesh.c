@@ -1,8 +1,34 @@
 #include "mac60211.h"
 
+#define MAX_METRIC	0xffffffff
+
+#ifndef MSEC_TO_TU
+#define MSEC_TO_TU(x)   (x*1000/1024)
+#endif
+
+#ifndef SN_GT
+#define SN_GT(x, y) ((s32)(y - x) < 0)
+#endif
+#ifndef SN_LT
+#define SN_LT(x, y) ((s32)(x - y) < 0)
+#endif
+
+enum ak60211_mpath_frame_type {
+	AK60211_MPATH_PREQ = 0,
+	AK60211_MPATH_PREP,
+	AK60211_MPATH_PERR,
+	AK60211_MPATH_RANN
+};
+
+static int ak60211_mpath_sel_frame_tx(enum ak60211_mpath_frame_type action, const u8 *orig_addr, u32 orig_sn, 
+                        const u8 *target, u32 target_sn, const u8* da, u8 hop_count, u8 ttl, u32 lifetime, 
+                        u32 metric, u32 preq_id, const u8 *sa);
+static struct ak60211_mpath mesh_path[MAX_PATH_NUM] = {0};
 struct net_bridge_hmc *dev;
 static struct ak60211_sta_info mesh_sta[MAX_STA_NUM] = {0};
 static struct if_plcmesh    plcmesh = {0};
+const u8 broadcast_addr[ETH_ALEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+
 const struct meshprofhdr local_prof = {
     .meshid_elem.elemid = 114,
     .meshid_elem.len = MESHID_SIZE,
@@ -127,6 +153,79 @@ static struct ak60211_sta_info* mesh_sta_info_get(u8 *addr)
     return sta;
 }
 
+static struct ak60211_mpath *ak60211_mpath_lookup(const u8 *dst)
+{
+    int i;
+    for (i = 0; i < MAX_PATH_NUM; i++) {
+        if (ether_addr_equal(dst, mesh_path[i].dst)) {
+            return &mesh_path[i];
+        }
+    }
+
+    return NULL;
+}
+
+static struct ak60211_mpath *ak60211_mpath_new(const u8 *dst)
+{
+    int i;
+    struct ak60211_mpath *new_mpath;
+    for (i = 0; i < MAX_PATH_NUM; i++) {
+        if (!mesh_path[i].is_used) {
+            new_mpath = &mesh_path[i];
+            new_mpath->is_used = true;
+            memcpy(new_mpath, dst, ETH_ALEN);
+
+            eth_broadcast_addr(new_mpath->rann_snd_addr);
+            new_mpath->is_root = false;
+            new_mpath->flags = 0;
+            new_mpath->exp_time = jiffies;
+
+            // todo: timer_setup (mesh_path_timer)
+
+            return new_mpath;
+        }
+    }
+
+    return NULL;
+}
+
+static struct ak60211_mpath *ak60211_mpath_add(const u8 *dst)
+{
+    struct ak60211_mpath *new_mpath;
+    int i, max_used = true;
+
+    if (ether_addr_equal(dst, dev->br_addr)) {
+        hmc_err("dst is equal to dev->br_addr no support");
+        return false;
+    }
+
+    if (is_multicast_ether_addr(dst)) {
+        hmc_err("dst is multicast no support");
+        return false;
+    }
+
+    for (i = 0; i < MAX_PATH_NUM; i++) {
+        if (!mesh_path[i].is_used) {
+            max_used = false;
+            break;
+        }
+    }
+
+    if (max_used) {
+        hmc_err("mpath is max size");
+        return false;
+    }
+
+    new_mpath = ak60211_mpath_new(dst);
+
+    if (!new_mpath) {
+        hmc_err("mpath allocate fail");
+        return false;
+    }
+    
+    return new_mpath;
+}
+
 static bool ak60211_llid_in_use(u16 llid)
 {
     int i;
@@ -200,13 +299,9 @@ void ak60211_pkt_hex_dump(struct sk_buff *skb, const char* type, int offset)
 static void ak60211_mesh_plink_frame_tx(enum ieee80211_self_protected_actioncode action, u8 *addr, u16 llid, u16 plid)
 {
     struct sk_buff *nskb;
-    struct frametype fctl = {0};
     struct ethhdr *ether;
     struct plc_hdr *plchdr;
     u8 *pos;
-    
-    fctl.type = MGMT;
-    fctl.stype = S_ACTION;
 
     /*
      * headroom + ETH header + plchdr + action + fcs + reserved
@@ -228,7 +323,9 @@ static void ak60211_mesh_plink_frame_tx(enum ieee80211_self_protected_actioncode
 
     /* plc hdr*/
     plchdr = skb_put_zero(nskb, 42);
-    memcpy(&plchdr->framectl, &fctl, 2);
+    plchdr->framectl = cpu_to_le16(AK60211_FTYPE_MGMT |
+                         AK60211_STYPE_ACTION);
+
     plchdr->duration_id = 0;
 
     memcpy(plchdr->machdr.h_addr1, addr, 6);
@@ -597,6 +694,216 @@ static void ak60211_mesh_rx_plink_frame(struct plc_packet_union *buff)
     ak60211_mesh_plink_fsm(event, sta, buff);
 }
 
+static u32 ak60211_plc_link_metric_get(struct ak60211_sta_info *sta)
+{
+    return 10;
+}
+
+static u32 ak60211_hwmp_route_info_get(struct plc_packet_union *buff, enum ak60211_mpath_frame_type action)
+{
+    struct ak60211_sta_info *sta;
+    struct ak60211_mpath *mpath;
+    bool fresh_info;
+    const u8 *orig_addr;
+    u32 orig_sn, orig_metric;
+    unsigned long orig_lifetime, exp_time;
+    u32 last_hop_metric, new_metric;
+    bool process = true;
+    u8 hopcount;
+
+    sta = mesh_info(buff->plchdr.machdr.h_addr2);
+    if (!sta) {
+        return 0;
+    }
+
+    /* todo: metric get??*/
+    last_hop_metric = ak60211_plc_link_metric_get(sta);
+
+    /* Update and check originator routing info */
+    fresh_info = true;
+
+    switch(action) {
+        case AK60211_MPATH_PREQ:
+            orig_addr = buff->un.preq.elem.h_origaddr;
+            orig_sn = buff->un.preq.elem.orig_sn;
+            orig_lifetime = buff->un.preq.elem.lifetime;
+            orig_metric = buff->un.preq.elem.metric;
+            hopcount = buff->un.preq.elem.hop_count + 1;
+            break;
+        case AK60211_MPATH_PREP:
+            orig_addr = buff->un.prep.elem.h_targetaddr;
+            orig_sn = buff->un.prep.elem.target_sn;
+            orig_lifetime = buff->un.prep.elem.lifetime;
+            orig_metric = buff->un.prep.elem.metric;
+            hopcount = buff->un.prep.elem.hop_count + 1;
+            break;
+        default:
+            return 0;
+    }
+
+    new_metric = orig_metric + last_hop_metric;
+    if (new_metric < orig_metric) {
+        new_metric = MAX_METRIC;
+    }
+    exp_time = TU_TO_EXP_TIME(orig_lifetime);
+
+    if (ether_addr_equal(orig_addr, dev->br_addr)) {
+        process = false;
+        fresh_info = false;
+    } else {
+        mpath = ak60211_mpath_lookup(orig_addr);
+        if (mpath) {
+            if (mpath->flags & MESH_PATH_FIXED) {
+                fresh_info = false;
+            } else if (mpath->is_used) {
+                if (SN_GT(mpath->sn, orig_sn) ||
+                        (mpath->sn == orig_sn &&
+                        (!ether_addr_equal(mpath->next_hop, sta->addr)? mult_frac(new_metric, 10, 9) : 
+                         new_metric) >= mpath->metric)) {
+                    process = false;
+                    fresh_info = false;
+                }       
+            }
+        } else {
+            mpath = ak60211_mpath_add(orig_addr);
+            if (!mpath) {
+                return 0;
+            }
+        }
+
+        if (fresh_info) {
+            ;/* todo: fresh_info for originator frame and transmitter frame */
+        }
+    }
+
+    /* todo: Update and check transmitter routing info */
+
+    return process? new_metric : 0;
+}
+
+static void ak60211_hwmp_preq_frame_process(struct plc_packet_union *buff, u32 orig_metric)
+{
+    struct ak60211_mpath *mpath = NULL;
+    const u8 *target_addr, *orig_addr;
+    const u8 *da;
+    u8 target_flags, ttl, flags;
+    u32 orig_sn, target_sn, lifetime, target_metric = 0;
+    bool reply = false;
+    bool forward = true;
+    bool root_is_gate;
+
+    /* Update target SN, if present */
+    target_addr = buff->un.preq.elem.h_targetaddr;
+    orig_addr = buff->un.preq.elem.h_origaddr;
+    target_sn = buff->un.preq.elem.target_sn;
+    orig_sn = buff->un.preq.elem.orig_sn;
+    target_flags = buff->un.preq.elem.per_target_flags;
+    
+    flags = buff->un.preq.elem.flags;
+    root_is_gate = !!(flags & RANN_FLAG_IS_GATE);
+
+    hmc_info("received PREQ from %pM\n", orig_addr);
+
+    if (ether_addr_equal(target_addr, dev->br_addr)) {
+        hmc_info("PREQ is for us\n");
+        forward = false;
+        reply = true;
+        target_metric = 0;
+
+        if (SN_GT(target_sn, plcmesh.sn)) {
+            plcmesh.sn = target_sn;
+        }
+
+        if (time_after(jiffies, plcmesh.last_sn_update + 
+                   msecs_to_jiffies(MESH_TRAVERSAL_TIME)) || 
+                time_before(jiffies, plcmesh.last_sn_update)) {
+            plcmesh.sn++;
+            plcmesh.last_sn_update = jiffies;
+        }
+
+        target_sn = plcmesh.sn;
+    } else if (is_broadcast_ether_addr(target_addr)) {
+        /* target only and broadcast will go in here */
+        mpath = ak60211_mpath_lookup(orig_addr);
+        if (mpath) {
+            reply = true;
+            target_addr = dev->br_addr;
+            target_sn = ++plcmesh.sn;
+            target_metric = 0;
+            plcmesh.last_sn_update = jiffies;
+        }
+        if (root_is_gate) {
+            /* todo: mesh_path_add_gate() */
+        }
+
+    } else {
+        mpath = ak60211_mpath_lookup(target_addr);
+        if (mpath) {
+            if (SN_LT(mpath->sn, target_sn)) {
+                mpath->sn = target_sn;
+                mpath->flags |= MESH_PATH_SN_VALID;
+            }
+        }
+    }
+
+    if (reply) {
+        lifetime = buff->un.preq.elem.lifetime;
+        ttl = MAX_MESH_TTL;
+        if (ttl != 0) {
+            hmc_info("replying to the PREQ\n");
+            ak60211_mpath_sel_frame_tx(AK60211_MPATH_PREP, orig_addr, orig_sn, target_addr, target_sn, buff->sa, 
+                                       0, ttl, lifetime, target_metric, 0, dev->br_addr);
+
+        }
+    }
+
+    if (forward) {
+        u32 preq_id;
+        u8 hopcount;
+
+        ttl = buff->un.preq.elem.ttl;
+        lifetime = buff->un.preq.elem.lifetime;
+        if (ttl <= 1) {
+            return;
+        }
+
+        hmc_info("forwarding the PREQ from %pM\n", orig_addr);
+        --ttl;
+        preq_id = buff->un.preq.elem.preq_id;
+        hopcount = buff->un.preq.elem.hop_count + 1;
+        da = (mpath && mpath->is_root)? mpath->rann_snd_addr : broadcast_addr;
+
+        ak60211_mpath_sel_frame_tx(AK60211_MPATH_PREQ, orig_addr, orig_sn, target_addr, target_sn, da, 
+                                   hopcount, ttl, lifetime, orig_metric, preq_id, dev->br_addr);
+    }
+}
+
+static void ak60211_mesh_rx_path_sel_frame(struct plc_packet_union *buff)
+{
+    u32 path_metric;
+    struct ak60211_sta_info *sta;
+    enum ak60211_mpath_frame_type tag = buff->un.preq.elem.tag;
+    sta = mesh_info(buff->plchdr.machdr.h_addr2);
+    if (!sta || sta->plink_state != AK60211_PLINK_ESTAB) {
+        return;
+    }
+
+    switch(tag) {
+        case AK60211_MPATH_PREQ:
+            if (buff->un.preq.elem.len != 37) {
+                return;
+            }
+            path_metric = ak60211_hwmp_route_info_get(buff, AK60211_MPATH_PREQ);
+
+            if (path_metric) {
+                ak60211_hwmp_preq_frame_process(buff, path_metric);
+            }
+            break;
+        default:
+            break;
+    }
+}
+
 static void ak60211_mesh_rx_mgmt_action(struct plc_packet_union *buff)
 {
     switch(buff->un.self.category) {
@@ -611,19 +918,153 @@ static void ak60211_mesh_rx_mgmt_action(struct plc_packet_union *buff)
             break;
         case WLAN_CATEGORY_MESH_ACTION:
             if (buff->un.self.action == WLAN_MESH_ACTION_HWMP_PATH_SELECTION) {
-                //ak60211_mesh_rx_path_sel_frame(buff);
+                ak60211_mesh_rx_path_sel_frame(buff);
             }
             break;
+    }
+}
+
+static int ak60211_mpath_sel_frame_tx(enum ak60211_mpath_frame_type action, const u8 *orig_addr, u32 orig_sn, 
+                        const u8 *target, u32 target_sn, const u8* da, u8 hop_count, u8 ttl, u32 lifetime, 
+                        u32 metric, u32 preq_id, const u8 *sa)
+{
+    struct sk_buff *skb;
+    struct plc_packet_union *plcpkts;
+    u8 *pos, ie_len;
+    int hdr_len = sizeof(struct ethhdr) + sizeof(struct plc_hdr);
+
+    switch(action) {
+        case AK60211_MPATH_PREQ:
+            hdr_len += sizeof(struct preq_pkts);
+            break;
+        case AK60211_MPATH_PREP:
+            hdr_len += sizeof(struct prep_pkts);
+            break;
+        default:
+            break;
+    }
+    skb = dev_alloc_skb(2 + hdr_len + 2);
+
+    if (!skb) {
+        return -1;
+    }
+
+    skb_reserve(skb, 2);
+   
+    pos = skb_put_zero(skb, hdr_len);
+    plc_fill_ethhdr(pos, da, orig_addr, ntohs(0xAA55));
+
+    plcpkts = (struct plc_packet_union *)pos;
+    plcpkts->plchdr.framectl = cpu_to_le16(AK60211_FTYPE_MGMT |
+                              AK60211_STYPE_ACTION);
+
+    memcpy(plcpkts->plchdr.machdr.h_addr1, da, ETH_ALEN);
+    memcpy(plcpkts->plchdr.machdr.h_addr2, sa, ETH_ALEN);
+    memcpy(plcpkts->plchdr.machdr.h_addr3, sa, ETH_ALEN);
+
+    plcpkts->un.preq.category = WLAN_CATEGORY_MESH_ACTION;
+    plcpkts->un.preq.action = WLAN_MESH_ACTION_HWMP_PATH_SELECTION;
+
+    pos = (u8 *)&plcpkts->un.preq.elem.tag;
+    switch(action) {
+        case AK60211_MPATH_PREQ:
+            hmc_info("seding PREQ to %pM\n", target);
+            *pos++ = WLAN_EID_PREQ;
+            ie_len = 37;
+            break;
+        case AK60211_MPATH_PREP:
+            hmc_info("sending PREP to %pM\n", orig_addr);
+            *pos++ = WLAN_EID_PREP;
+            ie_len = 31;
+            break;
+        default:
+            /* RANN and ERR */
+            break;
+    }
+
+    *pos++ = ie_len;
+    *pos++ = 0;
+    *pos++ = hop_count;
+    *pos++ = ttl;
+
+    if (action == AK60211_MPATH_PREP) {
+        memcpy(pos, target, ETH_ALEN);
+        pos += ETH_ALEN;
+        put_unaligned_le32(target_sn, pos);
+        pos += 4;
+    } else {
+        if (action == AK60211_MPATH_PREQ) {
+            put_unaligned_le32(preq_id, pos);
+            pos += 4;
+        }
+        memcpy(pos, orig_addr, ETH_ALEN);
+        pos += ETH_ALEN;
+        put_unaligned_le32(orig_sn, pos);
+        pos += 4;
+    }
+    put_unaligned_le32(lifetime, pos);
+    pos += 4;
+    put_unaligned_le32(metric, pos);
+    pos += 4;
+    if (action == AK60211_MPATH_PREQ) {
+        *pos++ = 1;
+        *pos++ = 0;
+        memcpy(pos, target, ETH_ALEN);
+        pos += ETH_ALEN;
+        put_unaligned_le32(target_sn, pos);
+        pos += 4;
+    } else if (action == AK60211_MPATH_PREP) {
+        memcpy(pos, orig_addr, ETH_ALEN);
+        pos += ETH_ALEN;
+        put_unaligned_le32(orig_sn, pos);
+        pos += 4;
+    }
+
+    skb_reset_mac_header(skb);
+
+    ak60211_pkt_hex_dump(skb, "ak60211_mpath_sel_frame_tx", 0);
+    br_hmc_forward(skb, plc);
+
+    return true;
+}
+
+void ak60211_mpath_discovery(void)
+{
+    struct ak60211_mpath *mpath;
+    struct ak60211_sta_info *sta;
+    const u8 *da;
+    u8 *addr, ttl;
+    u32 i, lifetime;
+
+    for (i = 0; i < MAX_STA_NUM; i++) {
+        sta = &mesh_sta[i];
+        if (sta->used) {
+            addr = sta->addr;
+            mpath = ak60211_mpath_lookup(addr);
+
+            if (!mpath) {
+                mpath = ak60211_mpath_add(addr);
+                if (!mpath) {
+                    return;
+                }
+            }
+            da = (mpath->is_root)? mpath->rann_snd_addr:broadcast_addr;
+            ttl = MAX_MESH_TTL;
+            lifetime = MSEC_TO_TU(2000);
+            ak60211_mpath_sel_frame_tx(AK60211_MPATH_PREQ, dev->br_addr, plcmesh.sn, mpath->dst, mpath->sn, da, 
+                               0, ttl, lifetime, 0, plcmesh.preq_id++, dev->br_addr);
+        }
     }
 }
 
 static void ak60211_mesh_bcn_presp(struct plc_packet_union *buff)
 {
     struct meshprofhdr peer;
-    struct frametype fctl;
-    *(u16*)&fctl = buff->plchdr.framectl;
+    u16 stype;
+    
+    stype = (le16_to_cpu(buff->plchdr.framectl) & AK60211_FCTL_STYPE);
 
-    if (fctl.stype == S_PROBE_RESP && memcmp(buff->plchdr.machdr.h_addr3, dev->br_addr, 6)) {
+    if (stype == AK60211_STYPE_PROBE_RESP && memcmp(buff->plchdr.machdr.h_addr3, dev->br_addr, 6)) {
         return;
     }
 
@@ -641,7 +1082,7 @@ int ak60211_rx_handler(struct sk_buff *pskb)
 {
     struct sk_buff *skb = pskb;
     struct plc_packet_union *plcbuff;
-    struct frametype fctl;
+    u16 stype, ftype;
     
     plcbuff = (struct plc_packet_union *)skb_mac_header(skb);
 
@@ -655,33 +1096,36 @@ int ak60211_rx_handler(struct sk_buff *pskb)
     }
 
     hmc_info("eth type = %x\n", htons(plcbuff->ethtype));
-    if (htons(plcbuff->ethtype) != 0xAA55)
+    if (htons(plcbuff->ethtype) != 0xAA55) {
         goto drop;
+    }
 
-    *(u16*)&fctl = plcbuff->plchdr.framectl;
+    ftype = (le16_to_cpu(plcbuff->plchdr.framectl) & AK60211_FCTL_FTYPE);
+    stype = (le16_to_cpu(plcbuff->plchdr.framectl) & AK60211_FCTL_STYPE);
 
-    switch(fctl.type) {
-        case MGMT:
-            switch(fctl.stype) {
-                case S_BEACON:
+    switch(ftype) {
+        case AK60211_FTYPE_MGMT:
+            switch(stype) {
+                case AK60211_STYPE_BEACON:
                     hmc_info("S_BEACON");
                     ak60211_mesh_bcn_presp(plcbuff);
                     break;
-                case S_PROBE_RESP:
+                case AK60211_STYPE_PROBE_RESP:
                     hmc_info("S_PROBE_RESP");
                     break;
-                case S_ACTION:
+                case AK60211_STYPE_ACTION:
                     hmc_info("S_ACTION");
                     ak60211_mesh_rx_mgmt_action(plcbuff);
                     break;
             }
             break;
-        case CTRL:
+        case AK60211_FTYPE_CTRL:
 
             break;
-        case DATA:
-            switch(fctl.stype) {
-                case S_QOSDATA:
+        case AK60211_FTYPE_DATA:
+            switch(stype) {
+                case AK60211_STYPE_QOSDATA:
+
                     hmc_info("S_QOSDATA");
                     break;
             }

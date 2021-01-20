@@ -161,7 +161,7 @@ static void plc_gen_sbeacon(struct plc_packet_union *buff)
     buff->un.beacon.meshconf_elem.mesh_cap.reserved = 0;
 }
 
-static void plc_fill_ethhdr(u8 *st, u8 *da, u8 *sa, u16 type)
+void plc_fill_ethhdr(u8 *st, const u8 *da, const u8 *sa, u16 type)
 {
     memcpy(st, da, ETH_ALEN);
     st += 6;
@@ -173,7 +173,6 @@ static void plc_fill_ethhdr(u8 *st, u8 *da, u8 *sa, u16 type)
 static void plc_send_beacon(void)
 {
     struct sk_buff *nskb;    
-    u8 broadcast[ETH_ALEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     struct plc_packet_union sbeacon;
     int beacon_len = sizeof(struct ethhdr) + sizeof(struct plc_hdr) + sizeof(struct beacon_pkts);
     u8 *pos;
@@ -192,7 +191,7 @@ static void plc_send_beacon(void)
     skb_reserve(nskb, 2);
 
     pos = skb_put_zero(nskb, beacon_len);
-    plc_fill_ethhdr((u8 *)&sbeacon, broadcast, plc->br_addr, ntohs(0xAA55));
+    plc_fill_ethhdr((u8 *)&sbeacon, broadcast_addr, plc->br_addr, ntohs(0xAA55));
 
     memcpy(sbeacon.plchdr.machdr.h_addr2, plc->br_addr, ETH_ALEN);
     memcpy(sbeacon.plchdr.machdr.h_addr4, plc->br_addr, ETH_ALEN);
@@ -232,6 +231,8 @@ static void sbeacon_wq_init(void)
     WARN_ON(!sbeacon_wq);
 
     INIT_DELAYED_WORK(&sbeacon_work, plc_sbeacon_wq);
+    plc_send_beacon();
+
     if (!queue_delayed_work(sbeacon_wq, &sbeacon_work, msecs_to_jiffies(SBEACON_DELAY)))
 		hmc_err("sbeacon was already on queue\n");
 
@@ -239,34 +240,40 @@ static void sbeacon_wq_init(void)
 
 static ssize_t plc_proc_test_read(struct file *pfile, char __user *buf, size_t size, loff_t *pos) 
 {
-    static bool sbeacon_flag = false;
     TRACE();
 
     if (*pos != 0) {
         return 0;
     }
 
-    /*if (!sbeacon_flag) {
-        sbeacon_flag = true;
-        plc_send_beacon();
-    }
-    return 0;*/
-    sbeacon_flag = !sbeacon_flag;
-
-    if (sbeacon_flag) {
-        sbeacon_wq_init();
-    } else {
-        sbeacon_wq_deinit();
-    }
-    //plc_send_beacon();
     return 0;
 }
 
-static ssize_t plc_proc_test_write(struct file *pfile, const char *buf, size_t size, loff_t *pos) 
+static ssize_t plc_proc_test_write(struct file *pfile, const char *ubuf, size_t size, loff_t *pos) 
 {
-    TRACE();
+#define MAX_BUF_WMAX    20
+    static bool sbeacon_flag = false;
+    char buf[MAX_BUF_WMAX];
 
-    hmc_info("plc proc write");
+    // TRACE();
+
+    if (*pos >0 || size > MAX_BUF_WMAX) {
+        return -EFAULT;
+    }
+    if (copy_from_user(buf, ubuf, size)) {
+        return -EFAULT;
+    }
+
+    // beacon start
+    if (!memcmp(buf,"beacon", size-1)) {
+        sbeacon_flag = !sbeacon_flag;
+        if (sbeacon_flag) {
+            sbeacon_wq_init();
+        } else {
+            sbeacon_wq_deinit();
+        }
+    }
+
     return size;
 }
 

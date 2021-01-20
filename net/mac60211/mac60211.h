@@ -42,6 +42,7 @@
 #include <linux/random.h>
 #include <linux/ieee80211.h>
 #include <linux/skbuff.h>
+#include <linux/jiffies.h>
 
 #include "../bridge/br_private.h"
 
@@ -60,19 +61,30 @@
 #define __packed __attribute__((packed))
 #endif
 
+#define MESH_TRAVERSAL_TIME  50
 #define SBEACON_DELAY   5000
+#define SPATHDISC_DELAY 3000
 #define MESHID_SIZE     30
 #define MAX_STA_NUM     16
+#define MAX_PATH_NUM    16
+#define MAX_MESH_TTL    32
 #define AK60211MESH_RETRY_TIMEOUT   5000
-#define MGMT            0   // 0b00
-#define CTRL            1   // 0b01
-#define DATA            2   // 0b10
 
-#define S_BEACON        8   // 0b1000
-#define S_PROBE_REQ     4   // 0b0100
-#define S_PROBE_RESP    5   // 0b0101
-#define S_ACTION        13  // 0b1101
-#define S_QOSDATA       8   // 0b1000
+#define AK60211_FCTL_FTYPE      0x000c
+#define AK60211_FCTL_STYPE      0x00f0
+
+#define AK60211_FTYPE_MGMT          0x0000   // 0b00
+#define AK60211_FTYPE_CTRL          0x0004   // 0b01
+#define AK60211_FTYPE_DATA          0x0008   // 0b10
+
+/* management */
+#define AK60211_STYPE_BEACON        0x0080   // 0b1000
+#define AK60211_STYPE_PROBE_REQ     0x0040   // 0b0100
+#define AK60211_STYPE_PROBE_RESP    0x0050   // 0b0101
+#define AK60211_STYPE_ACTION        0x00D0   // 0b1101
+
+/* data */
+#define AK60211_STYPE_QOSDATA       0x0080   // 0b1000
 
 enum ak60211_plink_event {
 	PLINK_UNDEFINED,
@@ -100,21 +112,49 @@ enum ak60211_plink_state {
 	MAX_AK60211_PLINK_STATES = NUM_AK60211_PLINK_STATES - 1
 };
 
+enum ak60211_mpath_flags {
+	MESH_PATH_ACTIVE = BIT(0),
+	MESH_PATH_RESOLVING = BIT(1),
+	MESH_PATH_SN_VALID = BIT(2),
+	MESH_PATH_FIXED = BIT(3),
+	MESH_PATH_RESOLVED = BIT(4),
+	MESH_PATH_REQ_QUEUED = BIT(5),
+	MESH_PATH_DELETED = BIT(6),
+};
+
+struct ak60211_mpath {
+    u8  dst[ETH_ALEN];
+    u8  next_hop[ETH_ALEN];
+    u32 sn;
+    u32 metric;
+    u8  hop_count;
+    unsigned long exp_time;
+    u32 discovery_timeout;
+    u8  discovery_retries;
+    enum ak60211_mpath_flags    flags;
+    u8  rann_snd_addr[ETH_ALEN];
+    u32 rann_metric;
+    unsigned long last_preq_to_root;
+    bool    is_root;
+    bool    is_gate;
+    bool    is_used;
+};
+
 struct if_plcmesh {
     // 802.11 mgmt sequence number
-    uint32_t        mgmt_sn;
+    u32        mgmt_sn;
     // 802.11 action sn
-    uint32_t        action_sn;
+    u32        action_sn;
     // Local mesh sequence number
-    uint32_t        sn;
+    u32        sn;
     // Last used PREQ id
-    uint32_t        preq_id;
+    u32        preq_id;
     // Timestamp of last SN update
-    uint32_t        last_sn_update;
+    unsigned long   last_sn_update;
     // Mesh data SN
-    uint32_t        mesh_seqnum;
+    u32        mesh_seqnum;
     // Mesh nexthop
-    uint16_t        nexthop[3];
+    u8        nexthop[6];
 };
 
 struct frametype {
@@ -201,7 +241,7 @@ struct preq_pkts {
         u8      flags;
         u8      hop_count;
         u8      ttl;
-        u32     path_disc_id;
+        u32     preq_id;
         u8      h_origaddr[ETH_ALEN];
         u32     orig_sn;
         u32     lifetime;
@@ -272,7 +312,9 @@ struct ak60211_sta_info {
 extern int ak60211_rx_handler(struct sk_buff *pskb);
 extern struct net_bridge_hmc *plc;
 extern void cf60211_get_dev(struct net_bridge_hmc *plc);
+extern void plc_fill_ethhdr(u8 *st, const u8 *da, const u8 *sa, u16 type);
+extern void ak60211_mpath_discovery(void);
 
-/* rx.c */
+extern const u8 broadcast_addr[ETH_ALEN];
 
 #endif /* MAC60211_H */
