@@ -67,8 +67,9 @@
 #define MESHID_SIZE     30
 #define MAX_STA_NUM     16
 #define MAX_PATH_NUM    16
-#define MAX_MESH_TTL    32
-#define AK60211MESH_RETRY_TIMEOUT   5000
+#define MAX_MESH_TTL    31
+#define AK60211_MESH_RETRY_TIMEOUT   5000
+#define AK60211_MESH_HWMP_PATH_TIMEOUT  3000
 
 #define AK60211_FCTL_FTYPE      0x000c
 #define AK60211_FCTL_STYPE      0x00f0
@@ -138,7 +139,7 @@ struct ak60211_mpath {
     bool    is_root;
     bool    is_gate;
     bool    is_used;
-};
+} __packed;
 
 struct if_plcmesh {
     // 802.11 mgmt sequence number
@@ -314,6 +315,7 @@ extern struct net_bridge_hmc *plc;
 extern void cf60211_get_dev(struct net_bridge_hmc *plc);
 extern void plc_fill_ethhdr(u8 *st, const u8 *da, const u8 *sa, u16 type);
 extern void ak60211_mpath_discovery(void);
+extern void ak60211_mpath_queue_preq(const u8 *dst, u32 hmc_sn);
 
 extern const u8 broadcast_addr[ETH_ALEN];
 

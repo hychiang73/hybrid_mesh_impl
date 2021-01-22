@@ -22,7 +22,7 @@ struct net_bridge_hmc_ops plc_br_hmc_ops = {
 
 static int plc_br_hmc_rx(struct sk_buff *skb)
 {
-    TRACE();
+    // TRACE();
     return ak60211_rx_handler(skb);
 }
 
@@ -253,7 +253,9 @@ static ssize_t plc_proc_test_write(struct file *pfile, const char *ubuf, size_t 
 {
 #define MAX_BUF_WMAX    20
     static bool sbeacon_flag = false;
+    static u32 hmc_sn = 0;
     char buf[MAX_BUF_WMAX];
+    u8 jetson2[ETH_ALEN] = {0x00, 0x04, 0x4b, 0xe6, 0xec, 0x3d};
 
     // TRACE();
 
@@ -274,6 +276,9 @@ static ssize_t plc_proc_test_write(struct file *pfile, const char *ubuf, size_t 
         }
     }
 
+    if (!memcmp(buf, "preq", size-1)) {
+        ak60211_mpath_queue_preq(jetson2, ++hmc_sn);
+    }
     return size;
 }
 
