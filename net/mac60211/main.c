@@ -305,10 +305,10 @@ static int __init plc_init(void)
 
     TRACE();
 
+    nl60211_netlink_init();
+
     plc_br_hmc_alloc();
     plc_proc_init();
-
-    nl60211_netlink_init();
 
     return ret;
 }
