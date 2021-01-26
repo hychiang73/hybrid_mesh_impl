@@ -1,4 +1,6 @@
+
 #include "mac60211.h"
+#include "nl60211.h"
 
 struct net_bridge_hmc *plc;
 struct proc_dir_entry *proc_dir_plc;
@@ -306,6 +308,8 @@ static int __init plc_init(void)
     plc_br_hmc_alloc();
     plc_proc_init();
 
+    nl60211_netlink_init();
+
     return ret;
 }
 
@@ -320,6 +324,9 @@ static void __exit plc_deinit(void)
 	    flush_workqueue(sbeacon_wq);
 	    destroy_workqueue(sbeacon_wq);
     }
+
+    nl60211_netlink_exit();
+
     return;
 }
 
