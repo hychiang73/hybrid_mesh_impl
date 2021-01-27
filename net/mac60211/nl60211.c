@@ -32,6 +32,7 @@ enum {
     NL60211_SEND_WIFI,     // snap sendwifi    br0 ff ff ff ff ff ff 11 22 33 44 55 66 aa 55 01 02 03 04 05 06
     NL60211_SEND_FLOOD,    // snap sendflood   br0 ff ff ff ff ff ff 11 22 33 44 55 66 aa 55 01 02 03 04 05 06
     NL60211_SEND_BEST,     // snap sendbest    br0 ff ff ff ff ff ff 11 22 33 44 55 66 aa 55 01 02 03 04 05 06
+    NL60211_GETSA,         // snap getsa       br0
 };
 
 // inside nl60211msg.buf
@@ -73,6 +74,11 @@ struct nl60211_sendflood_res {
 };
 struct nl60211_sendbest_res {
     int32_t     return_code;
+};
+struct nl60211_getsa_res {
+    int32_t     return_code;
+    uint32_t    sa_len;
+    uint8_t     sa[];
 };
 // request
 struct nl60211_debug_req {
@@ -120,6 +126,8 @@ struct nl60211_sendbest_req {
     uint8_t     sa[6];
     uint8_t     ether_type[2];
     uint8_t     payload[];
+};
+struct nl60211_getsa_req {
 };
 #define MAX_PAYLOAD 2048 /* maximum payload size for request&response */
 // This buffer is for tx & "rx". And it contains socket message header:"struct msghdr" for simplifying.
@@ -180,7 +188,7 @@ void test_hmc_gen_pkt_snap(unsigned int total_len, unsigned char *raw, uint32_t 
     skb_reserve(new_sk, 2);
 
     ether = (struct ethhdr *)skb_put(new_sk, ETH_HLEN);
-    memset(ether, 0, ETH_HLEN);
+    //memset(ether, 0, ETH_HLEN);
 
     memcpy(ether->h_dest, da, ETH_ALEN);
     memcpy(ether->h_source, sa, ETH_ALEN);
@@ -546,6 +554,49 @@ static void nl60211_cmd_sendbest(struct nl60211msg *nlreq)
     }
 }
 
+static void nl60211_cmd_getsa(struct nl60211msg *nlreq)
+{
+    //request
+    //response
+    struct sk_buff *skbres;
+    struct nl60211msg *nlres;
+    struct nl60211_getsa_res *res;
+    uint32_t nlmsgsize;
+    int32_t return_code = 0;
+    int ret;
+    //local
+    //temp
+
+    //response
+    if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
+        return;
+    nlmsgsize = sizeof(struct nl60211msg) - sizeof(nlres->buf) + sizeof(struct nl60211_getsa_res) + 6;
+    skbres = nlmsg_new(nlmsgsize, GFP_ATOMIC);
+
+    if(!skbres) {
+        printk(KERN_ERR "Failed to allocate new skb\n");
+        return;
+    }
+
+    nlres = (struct nl60211msg *)nlmsg_put(skbres,0,0,NLMSG_DONE,nlmsgsize,0);
+    NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
+
+    //copy input command to response
+    nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
+    nlres->if_index = nlreq->if_index;
+
+    res = (struct nl60211_getsa_res *)nlres->buf;
+    res->return_code = return_code;
+    res->sa_len = 6;
+    memcpy(res->sa, snap->br_addr, 6);
+
+    //nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
+    ret = nlmsg_unicast(nl_sk, skbres, pid_of_sender);
+
+    if(ret<0)
+        printk(KERN_INFO "Error while sending back to user\n");
+}
+
 static int nl60211_rx_callback_proto_filter(size_t len, u8 *data)
 {
     struct sk_buff *skb_res;
@@ -686,6 +737,8 @@ static void nl60211_netlink_input(struct sk_buff *skb_in)
         case NL60211_SEND_BEST:
             nl60211_cmd_sendbest(nlreq);
             break;
+        case NL60211_GETSA:
+            nl60211_cmd_getsa(nlreq);
         default:
             pr_warn("[SNAP] Unknown command = %d\n", nlh->nlmsg_type);
     }

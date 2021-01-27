@@ -25,6 +25,7 @@
 #define STR_WIFISEND        "sendwifi"
 #define STR_FLOODSEND       "sendflood"
 #define STR_BESTSEND        "sendbest"
+#define STR_GETSA           "getsa"
 //
 //ref: netlink.h
 //
@@ -43,6 +44,7 @@ enum {
     NL60211_SEND_WIFI,     // snap sendwifi    br0 ff ff ff ff ff ff 11 22 33 44 55 66 aa 55 01 02 03 04 05 06
     NL60211_SEND_FLOOD,    // snap sendflood   br0 ff ff ff ff ff ff 11 22 33 44 55 66 aa 55 01 02 03 04 05 06
     NL60211_SEND_BEST,     // snap sendbest    br0 ff ff ff ff ff ff 11 22 33 44 55 66 aa 55 01 02 03 04 05 06
+    NL60211_GETSA,         // snap getsa       br0
 };
 
 // inside nl60211msg.buf
@@ -84,6 +86,11 @@ struct nl60211_sendflood_res {
 };
 struct nl60211_sendbest_res {
     int32_t     return_code;
+};
+struct nl60211_getsa_res {
+    int32_t     return_code;
+    uint32_t    sa_len;
+    uint8_t     sa[];
 };
 // request
 struct nl60211_debug_req {
@@ -131,6 +138,8 @@ struct nl60211_sendbest_req {
     uint8_t     sa[6];
     uint8_t     ether_type[2];
     uint8_t     payload[];
+};
+struct nl60211_getsa_req {
 };
 #define MAX_PAYLOAD 2048 /* maximum payload size for request&response */
 
@@ -536,7 +545,7 @@ int do_sendwifi(int argc, char **argv)
     return 0;
 }
 
-int do_floodsned(int argc, char **argv)
+int do_sendflood(int argc, char **argv)
 {
     unsigned int if_idx = nametoindex(argv[0]);
     //request
@@ -606,6 +615,34 @@ int do_sendbest(int argc, char **argv)
     return 0;
 }
 
+int do_getsa(int argc, char **argv)
+{
+    uint32_t i;
+    unsigned int if_idx = nametoindex(argv[0]);
+    //request
+    //response
+    struct nl60211msg *nlres;
+    struct nl60211_getsa_res *res;
+
+    printf("get sa of :%s, idx = %d\n", argv[0], if_idx);
+
+    if_nl_send(NL60211_GETSA, if_idx, 0);
+    if_nl_recv();
+    nlres= (struct nl60211msg *)&sk_msg.nl_msg;
+    res = (struct nl60211_getsa_res *)nlres->buf;
+    printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
+    printf("if_index    = %d\n", nlres->if_index);
+    printf("return_code = %d\n", res->return_code);
+    printf("sa_len      = %d\n", res->sa_len);
+    printf("sa          =\n");
+    for (i=0; i<res->sa_len; i++) {
+        printf("%02X ", res->sa[i]);
+    }
+    printf("\n");
+
+    return 0;
+}
+
 static const struct cmd {
     const char *cmd;
     int (*func)(int argc, char **argv);
@@ -618,8 +655,9 @@ static const struct cmd {
     { STR_RECV_CANCEL,  do_recvcancel },
     { STR_PLCSEND,      do_sendplc },
     { STR_WIFISEND,     do_sendwifi },
-    { STR_FLOODSEND,    do_floodsned },
+    { STR_FLOODSEND,    do_sendflood },
     { STR_BESTSEND,     do_sendbest },
+    { STR_GETSA,        do_getsa },
     { 0 }
 };
 
