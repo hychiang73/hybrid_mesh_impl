@@ -167,7 +167,7 @@ void test_hmc_gen_pkt_snap(unsigned int total_len, unsigned char *raw, uint32_t 
     //TRACE();
 
     if (total_len > 19) {
-        new_sk = dev_alloc_skb(2 + total_len);
+        new_sk = dev_alloc_skb(2 + total_len + 2);
     } else {
         new_sk = dev_alloc_skb(128);
     }
@@ -202,7 +202,7 @@ void test_hmc_gen_pkt_snap(unsigned int total_len, unsigned char *raw, uint32_t 
 
     skb_reset_mac_header(new_sk);
 
-    br_hmc_print_skb(new_sk, "br_hmc_gen_pkt", 0);
+    br_hmc_print_skb(new_sk, "test_hmc_gen_pkt_snap", 0);
 
     switch (type) {
         case NL60211_SEND_PLC:
@@ -617,7 +617,7 @@ int nl60211_rx_callback(struct sk_buff *skb)
             if (i>=17)
                 break;
         }
-        nl60211_rx_callback_proto_filter(len, data);
+        nl60211_rx_callback_proto_filter(len+skb->mac_len, data);
         return 0;
     } while (0);
 
