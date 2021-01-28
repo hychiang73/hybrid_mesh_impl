@@ -27,6 +27,7 @@
 #include <net/switchdev.h>
 
 #include "br_private.h"
+#include "br_hmc.h"
 
 /*
  * Determine initial path cost based on speed.
@@ -348,8 +349,6 @@ static struct net_bridge_port *new_nbp(struct net_bridge *br,
 	struct net_bridge_port *p;
 	int index, err;
 
-	BR_TRACE();
-
 	index = find_portno(br);
 	if (index < 0)
 		return ERR_PTR(index);
@@ -383,8 +382,6 @@ int br_add_bridge(struct net *net, const char *name)
 	struct net_device *dev;
 	int res;
 
-	BR_TRACE();
-
 	dev = alloc_netdev(sizeof(struct net_bridge), name, NET_NAME_UNKNOWN,
 			   br_dev_setup);
 
@@ -406,8 +403,6 @@ int br_del_bridge(struct net *net, const char *name)
 {
 	struct net_device *dev;
 	int ret = 0;
-
-	BR_TRACE();
 
 	rtnl_lock();
 	dev = __dev_get_by_name(net, name);
@@ -495,8 +490,6 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 	int err = 0;
 	unsigned br_hr, dev_hr;
 	bool changed_addr;
-
-	BR_TRACE();
 
 	/* Don't allow bridging non-ethernet like devices, or DSA-enabled
 	 * master network devices since the bridge layer rx_handler prevents
@@ -634,8 +627,6 @@ int br_del_if(struct net_bridge *br, struct net_device *dev)
 {
 	struct net_bridge_port *p;
 	bool changed_addr;
-
-	BR_TRACE();
 
 	p = br_port_get_rtnl(dev);
 	if (!p || p->br != br)

@@ -20,6 +20,7 @@ struct file_operations proc_plc_fops = {
 
 struct net_bridge_hmc_ops plc_br_hmc_ops = {
     .rx = plc_br_hmc_rx,
+    .queue_preq = ak60211_mpath_queue_preq,
 };
 
 static int plc_br_hmc_rx(struct sk_buff *skb)
@@ -30,7 +31,7 @@ static int plc_br_hmc_rx(struct sk_buff *skb)
 
 static int plc_br_hmc_alloc(void) 
 {
-    plc = br_hmc_alloc(&plc_br_hmc_ops);
+    plc = br_hmc_alloc("plc", &plc_br_hmc_ops);
 
     if (!plc) {
         pr_err("plc is null\n");
@@ -255,9 +256,9 @@ static ssize_t plc_proc_test_write(struct file *pfile, const char *ubuf, size_t 
 {
 #define MAX_BUF_WMAX    20
     static bool sbeacon_flag = false;
-    static u32 hmc_sn = 0;
+ //   static u32 hmc_sn = 0;
     char buf[MAX_BUF_WMAX];
-    u8 jetson2[ETH_ALEN] = {0x00, 0x04, 0x4b, 0xe6, 0xec, 0x3d};
+//    u8 jetson2[ETH_ALEN] = {0x00, 0x04, 0x4b, 0xe6, 0xec, 0x3d};
 
     // TRACE();
 
@@ -279,7 +280,7 @@ static ssize_t plc_proc_test_write(struct file *pfile, const char *ubuf, size_t 
     }
 
     if (!memcmp(buf, "preq", size-1)) {
-        ak60211_mpath_queue_preq(jetson2, ++hmc_sn);
+        //ak60211_mpath_queue_preq(jetson2, ++hmc_sn);
     }
     return size;
 }
@@ -309,6 +310,7 @@ static int __init plc_init(void)
 
     plc_br_hmc_alloc();
     plc_proc_init();
+    ak60211_mesh_init();
 
     return ret;
 }
@@ -326,6 +328,7 @@ static void __exit plc_deinit(void)
     }
 
     nl60211_netlink_exit();
+    ak60211_mesh_exit();
 
     return;
 }

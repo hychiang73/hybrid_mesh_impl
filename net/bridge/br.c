@@ -22,6 +22,7 @@
 #include <net/switchdev.h>
 
 #include "br_private.h"
+#include "br_hmc.h"
 
 /*
  * Handle changes in state of network devices enslaved to a bridge.
@@ -36,8 +37,6 @@ static int br_device_event(struct notifier_block *unused, unsigned long event, v
 	struct net_bridge *br;
 	bool changed_addr;
 	int err;
-
-	BR_TRACE();
 
 	/* register of bridge completed, add sysfs entries */
 	if ((dev->priv_flags & IFF_EBRIDGE) && event == NETDEV_REGISTER) {
@@ -133,8 +132,6 @@ static int br_switchdev_event(struct notifier_block *unused,
 	struct switchdev_notifier_fdb_info *fdb_info;
 	int err = NOTIFY_DONE;
 
-	BR_TRACE();
-
 	p = br_port_get_rtnl(dev);
 	if (!p)
 		goto out;
@@ -171,8 +168,6 @@ static void __net_exit br_net_exit(struct net *net)
 	struct net_device *dev;
 	LIST_HEAD(list);
 
-	BR_TRACE();
-
 	rtnl_lock();
 	for_each_netdev(net, dev)
 		if (dev->priv_flags & IFF_EBRIDGE)
@@ -202,8 +197,6 @@ static int __init br_init(void)
 		pr_err("bridge: can't register sap for STP\n");
 		return err;
 	}
-
-	BR_TRACE();
 
 	err = br_fdb_init();
 	if (err)
@@ -264,7 +257,6 @@ err_out:
 
 static void __exit br_deinit(void)
 {
-	BR_TRACE();
 	stp_proto_unregister(&br_stp_proto);
 	br_netlink_fini();
 	unregister_switchdev_notifier(&br_switchdev_notifier);

@@ -2,7 +2,7 @@
 
 #if IN_JETSON
 #include "nl60211.h"
-#include "../bridge/br_private.h"
+#include "../bridge/br_hmc.h"
 #endif
 
 //Taken from https://stackoverflow.com/questions/15215865/netlink-sockets-in-c-using-the-3-x-linux-kernel?lq=1
@@ -750,7 +750,7 @@ struct netlink_kernel_cfg nl60211_netlink_cfg = {
 
 static int test_br_hmc_rx_snap(struct sk_buff *skb)
 {
-    //br_info("*** BR-HMC SNAP rx callback test (skb len=%d, data_len=%d)\n", skb->len, skb->data_len);
+    pr_info("*** BR-HMC SNAP rx callback test (skb len=%d, data_len=%d)\n", skb->len, skb->data_len);
     //br_hmc_print_skb(skb, "test_br_hmc_rx_snap", 0);
     nl60211_rx_callback(skb);
     return 0;
@@ -771,7 +771,7 @@ int nl60211_netlink_init(void)
         return -10;
     }
 
-    snap = br_hmc_alloc(&test_br_hmc_ops_f);
+    snap = br_hmc_alloc("nl60211", &test_br_hmc_ops_f);
 
     return 0;
 }

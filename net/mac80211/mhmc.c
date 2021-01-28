@@ -13,7 +13,7 @@ int mhmc_parse_before_deliver(struct sk_buff *skb)
 	hmc_print_skb(skb, "mhmc_parse_before_deliver", 0);
 
 	ether = eth_hdr(skb);
-	pr_info("Protocol: %x\n", htons(ether->h_proto));
+	//pr_info("Protocol: %x\n", htons(ether->h_proto));
 
 	if (htons(ether->h_proto) == 0xAA55) {
 		pr_info("protocl is 0xAA55, call netif_receive_skb directly");
@@ -27,6 +27,7 @@ EXPORT_SYMBOL(mhmc_parse_before_deliver);
 
 void hmc_print_skb(struct sk_buff *skb, const char *type, int offset)
 {
+#if 0
 	size_t len;
 	int rowsize = 16;
 	int i, l, linelen, remaining;
@@ -64,4 +65,5 @@ void hmc_print_skb(struct sk_buff *skb, const char *type, int offset)
 		pr_cont("\n");
 	}
 	pr_info("====================================\n");
+#endif
 }

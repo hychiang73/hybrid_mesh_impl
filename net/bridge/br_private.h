@@ -42,18 +42,6 @@
 /* Path to usermode spanning tree program */
 #define BR_STP_PROG	"/sbin/bridge-stp"
 
-#define br_hmc_info(fmt, arg...)                                \
-({                                                              \
-    pr_info("BR-HMC: (%s, %d): " fmt, __func__, __LINE__, ##arg);  \
-})                                                              \
-
-#define br_hmc_err(fmt, arg...)                                    \
-({                                                              \
-    pr_err("BR-HMC: (%s, %d): " fmt, __func__, __LINE__, ##arg);   \
-})                                                              \
-
-#define BR_TRACE()     br_hmc_info("%s\n", __func__);
-
 typedef struct bridge_id bridge_id;
 typedef struct mac_addr mac_addr;
 typedef __u16 port_id;
@@ -211,31 +199,6 @@ struct net_bridge_mdb_htable
 	u32				max;
 	u32				secret;
 	u32				ver;
-};
-
-enum hmc_br_cmd {
-	HMC_ADD_BR = 0x100,
-	HMC_ADD_IF = 0x101,
-};
-
-enum hmc_port_egress {
-	HMC_PORT_FLOOD = 0,
-	HMC_PORT_PLC,
-	HMC_PORT_WIFI
-};
-
-struct net_bridge_hmc
-{
-	unsigned char br_addr[ETH_ALEN];
-	struct net_bridge_hmc_ops *ops;
-	struct list_head list;
-
-	enum hmc_port_egress egress;
-};
-
-struct net_bridge_hmc_ops
-{
-	int (*rx)(struct sk_buff *skb);
 };
 
 struct net_bridge_port
@@ -517,21 +480,6 @@ static inline void br_netpoll_disable(struct net_bridge_port *p)
 {
 }
 #endif
-
-/* br_hmc.c */
-int br_hmc_init(void);
-void br_hmc_deinit(void);
-void br_hmc_print_skb(struct sk_buff *skb, const char* type, int offset);
-void br_hmc_gen_pkt(void);
-int br_hmc_forward(struct sk_buff *skb, struct net_bridge_hmc *hmc);
-int br_hmc_rx_handler(struct sk_buff *skb);
-//int br_hmc_rx_handler(struct net *net, struct sock *sk, struct sk_buff *skb);
-void br_hmc_net_info(struct sk_buff *skb);
-int br_hmc_forward(struct sk_buff *skb, struct net_bridge_hmc *hmc);
-void br_hmc_notify(int cmd, struct net_device *dev);
-struct net_bridge_hmc *br_hmc_alloc(struct net_bridge_hmc_ops *ops);
-int br_hmc_pass_frame_up(struct sk_buff *skb);
-void br_hmc_dealloc(void);
 
 /* br_fdb.c */
 int br_fdb_init(void);

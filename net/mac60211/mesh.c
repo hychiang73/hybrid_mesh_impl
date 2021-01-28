@@ -20,6 +20,10 @@ enum ak60211_mpath_frame_type {
 	AK60211_MPATH_RANN
 };
 
+/* work queue */
+static struct workqueue_struct *preq_wq;
+static struct work_struct preq_work;
+
 static int ak60211_mpath_sel_frame_tx(enum ak60211_mpath_frame_type action, u8 flags, const u8 *orig_addr, u32 orig_sn, 
                         const u8 *target, u32 target_sn, const u8* da, u8 hop_count, u8 ttl, u32 lifetime, 
                         u32 metric, u32 preq_id, const u8 *sa);
@@ -754,7 +758,7 @@ static u32 ak60211_hwmp_route_info_get(struct plc_packet_union *buff, enum ak602
     } else {
         mpath = ak60211_mpath_lookup(orig_addr);
         if (mpath) {
-            if (mpath->flags & MESH_PATH_FIXED) {
+            if (mpath->flags & PLC_MESH_PATH_FIXED) {
                 fresh_info = false;
             } else if (mpath->is_used) {
                 if (SN_GT(mpath->sn, orig_sn) ||
@@ -884,7 +888,7 @@ static void ak60211_hwmp_preq_frame_process(struct plc_packet_union *buff, u32 o
         if (mpath) {
             if (SN_LT(mpath->sn, target_sn)) {
                 mpath->sn = target_sn;
-                mpath->flags |= MESH_PATH_SN_VALID;
+                mpath->flags |= PLC_MESH_PATH_SN_VALID;
             }
         }
     }
@@ -1088,26 +1092,48 @@ static int ak60211_mpath_sel_frame_tx(enum ak60211_mpath_frame_type action, u8 f
     return true;
 }
 
-void ak60211_mpath_queue_preq(const u8 *dst, u32 hmc_sn)
+static void ak60211_preq_test_wq(struct work_struct *work)
 {
     struct ak60211_mpath *mpath;
-    u32 lifetime;
-    u8 ttl;
+    u8 ttl = 0;
+    u32 lifetime = 0;
 
-    mpath = ak60211_mpath_lookup(dst);
+    TRACE();
+
+    mpath = ak60211_mpath_lookup(plc->path->dst);
     if (!mpath) {
-        mpath = ak60211_mpath_add(dst);
+        mpath = ak60211_mpath_add(plc->path->dst);
         if (!mpath) {
             hmc_err("mpath build up fail");
             return;
         }
     }
 
-    plcmesh.sn = hmc_sn;
+    plcmesh.sn = plc->path->sn;
+    mpath->flags |= PLC_MESH_PATH_RESOLVING;
     ttl = MAX_MESH_TTL;
     lifetime = MSEC_TO_TU(AK60211_MESH_HWMP_PATH_TIMEOUT);
     ak60211_mpath_sel_frame_tx(AK60211_MPATH_PREQ, mpath->flags, dev->br_addr, plcmesh.sn, mpath->dst, mpath->sn, broadcast_addr, 
                                0, ttl, lifetime, 0, ++plcmesh.preq_id, dev->br_addr);
+
+    //plc->path->flags = mpath->flags;
+    plc->path->flags = BR_HMC_PATH_ACTIVE;
+
+    br_hmc_path_update(plc);
+}
+
+void ak60211_mpath_queue_preq(struct net_bridge_hmc *h)
+{
+    TRACE();
+
+    /* obtain the path information from br-hmc table */
+    memcpy(plc->path->dst, h->path->dst, ETH_ALEN);
+    plc->path->flags = h->path->flags;
+    plc->path->sn = h->path->sn;
+    plc->path->metric = h->path->metric;
+
+    /* create a workqueue to handle prep */
+    schedule_work(&preq_work);
 }
 
 void ak60211_mpath_discovery(void)
@@ -1177,10 +1203,8 @@ int ak60211_rx_handler(struct sk_buff *pskb)
         goto drop;
     }
 
-//    hmc_info("eth type = %x\n", htons(plcbuff->ethtype));
-    if (htons(plcbuff->ethtype) != 0xAA55) {
+    if (htons(plcbuff->ethtype) != 0xAA55)
         goto drop;
-    }
 
     ftype = (le16_to_cpu(plcbuff->plchdr.framectl) & AK60211_FCTL_FTYPE);
     stype = (le16_to_cpu(plcbuff->plchdr.framectl) & AK60211_FCTL_STYPE);
@@ -1218,4 +1242,20 @@ int ak60211_rx_handler(struct sk_buff *pskb)
 
 drop:
     return -1;
+}
+
+void ak60211_mesh_init(void)
+{
+	/* Init workqueue */
+	preq_wq = create_singlethread_workqueue("preq_wq");
+	WARN_ON(!preq_wq);
+	INIT_WORK(&preq_work, ak60211_preq_test_wq);
+}
+
+void ak60211_mesh_exit(void)
+{
+	if (preq_wq != NULL) {
+		flush_workqueue(preq_wq);
+		destroy_workqueue(preq_wq);
+	}
 }
