@@ -781,5 +781,7 @@ void nl60211_netlink_exit(void)
     printk(KERN_INFO "exiting snap module\n");
     if (nl_sk)
         netlink_kernel_release(nl_sk);
+
+    br_hmc_dealloc(snap);
 }
 

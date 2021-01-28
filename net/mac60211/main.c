@@ -329,6 +329,7 @@ static void __exit plc_deinit(void)
 
     nl60211_netlink_exit();
     ak60211_mesh_exit();
+    br_hmc_dealloc(plc);
 
     return;
 }

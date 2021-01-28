@@ -359,25 +359,26 @@ int br_hmc_forward(struct sk_buff *skb, struct net_bridge_hmc *hmc)
 {
 	int egress;
 	struct net_bridge *br;
-	struct net_bridge_port *p;
+	struct net_bridge_port *p, *n;
 
 	if (CHECK_MEM(skb))
 		return -ENOMEM;
 
-	br_hmc_print_skb(skb, "br_hmc_forward", 0);
-
 	if (CHECK_MEM(hmc))
-		egress = HMC_PORT_FLOOD;
+		return -ENOMEM;
+
+	egress = hmc->egress;
 
 	br = netdev_priv(hmc_local_dev);
 
 	rcu_read_lock();
 
-	list_for_each_entry(p, &br->port_list, list) {
+	list_for_each_entry_safe(p, n, &br->port_list, list) {
 		if (egress == HMC_PORT_FLOOD ||
 			(egress == HMC_PORT_PLC && (strncmp(p->dev->name, "eth0", strlen("eth0")) == 0)) ||
 			(egress == HMC_PORT_WIFI &&(strncmp(p->dev->name, "mesh0", strlen("mesh0")) == 0))) {
 			br_hmc_info("forward to %s\n", p->dev->name);
+			br_hmc_print_skb(skb, "br_hmc_forward", 0);
 			skb->dev = p->dev;
 			dev_queue_xmit(skb);
 		}
@@ -435,15 +436,17 @@ struct net_bridge_hmc *br_hmc_alloc(const char *name, struct net_bridge_hmc_ops 
 }
 EXPORT_SYMBOL(br_hmc_alloc);
 
-void br_hmc_dealloc(void)
+void br_hmc_dealloc(struct net_bridge_hmc *h)
 {
 	struct net_bridge_hmc *p, *n;
 
 	br_hmc_info("%s", __func__);
 
 	list_for_each_entry_safe(p, n, &br_hmc.list, list) {
-		list_del(&p->list);
-		kfree(p);
+		if (p->id == h->id) {
+			list_del(&p->list);
+			kfree(p);
+		}
 	}
 }
 EXPORT_SYMBOL(br_hmc_dealloc);
