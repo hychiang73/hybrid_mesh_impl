@@ -47,8 +47,7 @@ void br_hmc_print_skb(struct sk_buff *skb, const char *type, int offset)
 			len = 256;
 
 		remaining = len + 2 + offset;
-		pr_info("Packet hex dump (len = %ld):\n", len);
-		pr_info("============== %s ==============\n", type);
+		pr_info("============== %s (len = %ld) ==============\n", type, len);
 		for (i = 0; i < len; i += rowsize) {
 			pr_info("%06d\t", li);
 
@@ -65,7 +64,7 @@ void br_hmc_print_skb(struct sk_buff *skb, const char *type, int offset)
 
 			pr_cont("\n");
 		}
-		pr_info("====================================\n");
+		pr_info("===============================================\n");
 	}
 }
 EXPORT_SYMBOL(br_hmc_print_skb);

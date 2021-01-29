@@ -53,11 +53,6 @@ int br_dev_queue_push_xmit(struct net *net, struct sock *sk, struct sk_buff *skb
 		skb_set_network_header(skb, depth);
 	}
 
-	if (br_hmc_path_solve(skb) < 0) {
-		br_hmc_info("%s: skb was queued \n", __func__);
-		return 0;
-	}
-
 	dev_queue_xmit(skb);
 
 	return 0;

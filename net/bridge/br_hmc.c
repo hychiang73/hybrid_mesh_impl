@@ -52,8 +52,8 @@ struct hmc_table {
 };
 
 struct hmc_table *htbl = NULL;
-struct net_bridge_hmc br_hmc = NULL;
-struct net_device *hmc_local_dev = NULL;
+struct net_bridge_hmc br_hmc;
+struct net_device *hmc_local_dev;
 
 /* debug */
 bool br_hmc_debug = false;
@@ -316,26 +316,27 @@ int br_hmc_path_update(struct net_bridge_hmc *hmc)
 }
 EXPORT_SYMBOL(br_hmc_path_update);
 
-/* Returns: 0 if the DA was found and -ENOENT if the frame was queued. */
-int br_hmc_path_solve(struct sk_buff *skb)
+/* Returns: NF_ACCEPT if the frame was queued, otherwise BR makes a decision. */
+int br_hmc_path_resolve(struct sk_buff *skb)
 {
 	struct hmc_path *path = NULL;
 	struct sk_buff *skb_to_free = NULL;
 	struct net_bridge_hmc *plc = NULL;
 	u8 dest[ETH_ALEN] = {0};
 
+	skb_reset_mac_header(skb);
 	memcpy(dest, skb->data, ETH_ALEN);
 
 	br_hmc_print_skb(skb, "br_hmc_path_solve", 0);
 
 	if (!is_valid_ether_addr(dest))
-		return 0;
+		return NF_DROP;
 
 	if (!br_hmc_mesh_lookup(skb))
-		return 0;
+		return NF_DROP;
 
 	if (!(plc = br_hmc_iface_id_lookup(HMC_PLC_ID)))
-		return 0;
+		return NF_DROP;
 
 	/* no dest found, start resolving */
 	path = br_hmc_path_lookup(dest);
@@ -344,7 +345,7 @@ int br_hmc_path_solve(struct sk_buff *skb)
 		path = br_hmc_path_add(dest);
 		if (IS_ERR(path)) {
 			br_hmc_path_discard_frame(skb);
-			return PTR_ERR(path);
+			return NF_DROP;
 		}
 	}
 
@@ -359,8 +360,14 @@ int br_hmc_path_solve(struct sk_buff *skb)
 	if (skb_to_free)
 		br_hmc_path_discard_frame(skb_to_free);
 
-	return -ENOENT;
+	br_hmc_info("Tx frame was queued\n");
+
+	return NF_ACCEPT;
 }
+
+static const struct nf_br_ops br_hmc_ops = {
+	.br_dev_xmit_hook =	br_hmc_path_resolve,
+};
 
 /* calling br_dev_queue_push_xmit in br_forward.c for transmission. */
 int br_hmc_forward(struct sk_buff *skb, struct net_bridge_hmc *hmc)
@@ -515,6 +522,9 @@ int br_hmc_init(void)
 	RCU_INIT_POINTER(br_should_route_hook,
 			   (br_should_route_hook_t *)br_hmc_rx_handler);
 
+	/* see br_device.c */
+	RCU_INIT_POINTER(nf_br_ops, &br_hmc_ops);
+
 	return 0;
 }
 EXPORT_SYMBOL(br_hmc_init);
@@ -524,6 +534,8 @@ void br_hmc_deinit(void)
 	br_hmc_info("%s", __func__);
 
 	RCU_INIT_POINTER(br_should_route_hook, NULL);
+
+	RCU_INIT_POINTER(nf_br_ops, NULL);
 
 	br_hmc_misc_exit();
 
