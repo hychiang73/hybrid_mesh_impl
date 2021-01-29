@@ -105,7 +105,6 @@ int br_hmc_rx_handler(struct sk_buff *skb);
 void br_hmc_notify(int cmd, struct net_device *dev);
 int br_hmc_init(void);
 void br_hmc_deinit(void);
-void br_hmc_dealloc(struct net_bridge_hmc *h);
 
 /* br_hmc_misc.c */
 int br_hmc_misc_init(void);

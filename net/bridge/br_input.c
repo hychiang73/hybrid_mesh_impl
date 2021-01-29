@@ -316,10 +316,6 @@ rx_handler_result_t br_handle_frame(struct sk_buff **pskb)
 	}
 
 forward:
-	if (br_hmc_rx_handler(skb) == 0) {
-		br_hmc_info("drop rx frames\n");
-		goto drop;
-	}
 
 	switch (p->state) {
 	case BR_STATE_FORWARDING:

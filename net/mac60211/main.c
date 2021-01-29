@@ -1,6 +1,7 @@
 
 #include "mac60211.h"
 #include "nl60211.h"
+#include "../net/bridge/br_hmc.h"
 
 struct net_bridge_hmc *plc;
 struct proc_dir_entry *proc_dir_plc;
@@ -306,6 +307,8 @@ static int __init plc_init(void)
 
     TRACE();
 
+    br_hmc_init();
+
     nl60211_netlink_init();
 
     plc_br_hmc_alloc();
@@ -318,6 +321,7 @@ static int __init plc_init(void)
 static void __exit plc_deinit(void)
 {
     TRACE();
+    br_hmc_deinit();
     remove_proc_entry("plc", proc_dir_plc);
     remove_proc_entry("hmc_plc", NULL);
 
@@ -329,8 +333,6 @@ static void __exit plc_deinit(void)
 
     nl60211_netlink_exit();
     ak60211_mesh_exit();
-    br_hmc_dealloc(plc);
-
     return;
 }
 

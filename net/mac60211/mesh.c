@@ -1191,7 +1191,7 @@ int ak60211_rx_handler(struct sk_buff *pskb)
     struct sk_buff *skb = pskb;
     struct plc_packet_union *plcbuff;
     u16 stype, ftype;
-    
+
     plcbuff = (struct plc_packet_union *)skb_mac_header(skb);
 
     if (!is_valid_ether_addr(plcbuff->sa)) {
@@ -1238,10 +1238,10 @@ int ak60211_rx_handler(struct sk_buff *pskb)
             break;
     }
 
-    return 0;
+    return NF_ACCEPT;
 
 drop:
-    return -1;
+    return NF_DROP;
 }
 
 void ak60211_mesh_init(void)

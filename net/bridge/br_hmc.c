@@ -52,12 +52,15 @@ struct hmc_table {
 };
 
 struct hmc_table *htbl = NULL;
-struct net_bridge_hmc br_hmc;
-struct net_device *hmc_local_dev;
+struct net_bridge_hmc br_hmc = NULL;
+struct net_device *hmc_local_dev = NULL;
 
 /* debug */
 bool br_hmc_debug = false;
 EXPORT_SYMBOL(br_hmc_debug);
+
+static DEFINE_MUTEX(hmc_mutex);
+static DEFINE_MUTEX(call_rx);
 
 static u32 br_hmc_table_hash(const void *addr, u32 len, u32 seed)
 {
@@ -78,11 +81,16 @@ static struct net_bridge_hmc* __obtain_hmc_iface_id(u8 id)
 {
 	struct net_bridge_hmc *p, *n;
 
+	mutex_lock(&hmc_mutex);
+
 	list_for_each_entry_safe(p, n, &br_hmc.list, list) {
-		if (p->id == id)
+		if (p->id == id) {
+			mutex_unlock(&hmc_mutex);
 			return p;
+		}
 	}
 
+	mutex_unlock(&hmc_mutex);
 	return NULL;
 }
 
@@ -392,15 +400,30 @@ EXPORT_SYMBOL(br_hmc_forward);
 /* called by br_handle_frame in br_input.c */
 int br_hmc_rx_handler(struct sk_buff *skb)
 {
+	int ret = 0;
+	struct nf_hook_state state;
 	struct net_bridge_hmc *p;
+
+	nf_hook_state_init(&state, NULL, NF_BR_BROUTING, INT_MIN,
+			   NFPROTO_BRIDGE, skb->dev, NULL, NULL,
+			   dev_net(skb->dev), NULL);
 
 	br_hmc_print_skb(skb, "br_hmc_rx_handler", 0);
 
+	mutex_lock(&call_rx);
+
 	p = __obtain_hmc_iface_id(HMC_PLC_ID);
-	if (CHECK_MEM(p->ops->rx))
+	if (CHECK_MEM(p) || CHECK_MEM(p->ops->rx))
 		return 0;
 
-	return p->ops->rx(skb);
+	ret = p->ops->rx(skb);
+
+	mutex_unlock(&call_rx);
+
+	if (ret == NF_DROP)
+		return 0;
+
+	return 1;
 }
 
 struct net_bridge_hmc *br_hmc_alloc(const char *name, struct net_bridge_hmc_ops *ops)
@@ -436,20 +459,18 @@ struct net_bridge_hmc *br_hmc_alloc(const char *name, struct net_bridge_hmc_ops 
 }
 EXPORT_SYMBOL(br_hmc_alloc);
 
-void br_hmc_dealloc(struct net_bridge_hmc *h)
+void br_hmc_dealloc(void)
 {
 	struct net_bridge_hmc *p, *n;
 
-	br_hmc_info("%s", __func__);
-
+	mutex_lock(&hmc_mutex);
 	list_for_each_entry_safe(p, n, &br_hmc.list, list) {
-		if (p->id == h->id) {
-			list_del(&p->list);
-			kfree(p);
-		}
+		br_hmc_info("remove hmc id %d", p->id);
+		list_del(&p->list);
+		kfree(p);
 	}
+	mutex_unlock(&hmc_mutex);
 }
-EXPORT_SYMBOL(br_hmc_dealloc);
 
 void br_hmc_notify(int cmd, struct net_device *dev)
 {
@@ -490,14 +511,24 @@ int br_hmc_init(void)
 
 	br_hmc_pathtbl_init();
 
+	/* see br_input.c */
+	RCU_INIT_POINTER(br_should_route_hook,
+			   (br_should_route_hook_t *)br_hmc_rx_handler);
+
 	return 0;
 }
+EXPORT_SYMBOL(br_hmc_init);
 
 void br_hmc_deinit(void)
 {
 	br_hmc_info("%s", __func__);
 
+	RCU_INIT_POINTER(br_should_route_hook, NULL);
+
 	br_hmc_misc_exit();
+
+	br_hmc_dealloc();
 
 	br_hmc_table_free(htbl);
 }
+EXPORT_SYMBOL(br_hmc_deinit);

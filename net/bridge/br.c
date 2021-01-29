@@ -222,10 +222,6 @@ static int __init br_init(void)
 	if (err)
 		goto err_out5;
 
-	err = br_hmc_init();
-	if (err)
-		goto err_out5;
-
 	brioctl_set(br_ioctl_deviceless_stub);
 
 #if IS_ENABLED(CONFIG_ATM_LANE)
@@ -271,7 +267,6 @@ static void __exit br_deinit(void)
 	br_fdb_test_addr_hook = NULL;
 #endif
 	br_fdb_fini();
-	br_hmc_deinit();
 }
 
 module_init(br_init)
