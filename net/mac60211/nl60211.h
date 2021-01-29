@@ -46,21 +46,10 @@
 
 #include "../bridge/br_private.h"
 
-#define hmc_info(fmt, arg...)						            \
-({									                            \
-	pr_info("PLC: (%s, %d): " fmt, __func__, __LINE__, ##arg);	\
-})									                            \
-
-#define hmc_err(fmt, arg...)						            \
-({									                            \
-	pr_err("PLC: (%s, %d): " fmt, __func__, __LINE__, ##arg);	\
-})									                            \
-
 #define TRACE()     hmc_info("%s\n", __func__);
 #ifndef __packed
 #define __packed __attribute__((packed))
-#endif
-
+#endif 
 
 extern int nl60211_netlink_init(void);
 extern void nl60211_netlink_exit(void);
