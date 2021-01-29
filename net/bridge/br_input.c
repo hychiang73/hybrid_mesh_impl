@@ -21,6 +21,7 @@
 #include <linux/export.h>
 #include <linux/rculist.h>
 #include "br_private.h"
+#include "br_hmc.h"
 
 /* Hook for brouter */
 br_should_route_hook_t __rcu *br_should_route_hook __read_mostly;
@@ -39,8 +40,6 @@ static int br_pass_frame_up(struct sk_buff *skb)
 	struct net_bridge *br = netdev_priv(brdev);
 	struct net_bridge_vlan_group *vg;
 	struct pcpu_sw_netstats *brstats = this_cpu_ptr(br->stats);
-
-	BR_TRACE();
 
 	u64_stats_update_begin(&brstats->syncp);
 	brstats->rx_packets++;
@@ -82,8 +81,6 @@ static void br_do_proxy_arp(struct sk_buff *skb, struct net_bridge *br,
 	__be32 sip, tip;
 
 	BR_INPUT_SKB_CB(skb)->proxyarp_replied = false;
-
-	BR_TRACE();
 
 	if ((dev->flags & IFF_NOARP) ||
 	    !pskb_may_pull(skb, arp_hdr_len(dev)))
@@ -141,8 +138,6 @@ int br_handle_frame_finish(struct net *net, struct sock *sk, struct sk_buff *skb
 	bool local_rcv, mcast_hit = false;
 	struct net_bridge *br;
 	u16 vid = 0;
-
-	BR_TRACE();
 
 	if (!p || p->state == BR_STATE_DISABLED)
 		goto drop;
@@ -229,8 +224,6 @@ static void __br_handle_local_finish(struct sk_buff *skb)
 	struct net_bridge_port *p = br_port_get_rcu(skb->dev);
 	u16 vid = 0;
 
-	BR_TRACE();
-
 	/* check if vlan is allowed, to avoid spoofing */
 	if (p->flags & BR_LEARNING && br_should_learn(p, skb, &vid))
 		br_fdb_update(p->br, p, eth_hdr(skb)->h_source, vid, false);
@@ -240,8 +233,6 @@ static void __br_handle_local_finish(struct sk_buff *skb)
 static int br_handle_local_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
 {
 	struct net_bridge_port *p = br_port_get_rcu(skb->dev);
-
-	BR_TRACE();
 
 	__br_handle_local_finish(skb);
 
@@ -272,11 +263,6 @@ rx_handler_result_t br_handle_frame(struct sk_buff **pskb)
 		return RX_HANDLER_CONSUMED;
 
 	p = br_port_get_rcu(skb->dev);
-
-	if (br_hmc_rx_handler(skb) < 0)
-		goto forward;
-	else
-		goto drop;
 
 	if (unlikely(is_link_local_ether_addr(dest))) {
 		u16 fwd_mask = p->br->group_fwd_mask_required;
@@ -330,6 +316,7 @@ rx_handler_result_t br_handle_frame(struct sk_buff **pskb)
 	}
 
 forward:
+
 	switch (p->state) {
 	case BR_STATE_FORWARDING:
 		rhook = rcu_dereference(br_should_route_hook);

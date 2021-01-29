@@ -41,7 +41,6 @@ netdev_tx_t br_dev_xmit(struct sk_buff *skb, struct net_device *dev)
 	const struct nf_br_ops *nf_ops;
 	u16 vid = 0;
 
-	BR_TRACE();
 	rcu_read_lock();
 	nf_ops = rcu_dereference(nf_br_ops);
 	if (nf_ops && nf_ops->br_dev_xmit_hook(skb)) {
@@ -104,8 +103,6 @@ static int br_dev_init(struct net_device *dev)
 	struct net_bridge *br = netdev_priv(dev);
 	int err;
 
-	BR_TRACE();
-
 	br->stats = netdev_alloc_pcpu_stats(struct pcpu_sw_netstats);
 	if (!br->stats)
 		return -ENOMEM;
@@ -130,8 +127,6 @@ static int br_dev_open(struct net_device *dev)
 {
 	struct net_bridge *br = netdev_priv(dev);
 
-	BR_TRACE();
-
 	netdev_update_features(dev);
 	netif_start_queue(dev);
 	br_stp_enable_bridge(br);
@@ -154,8 +149,6 @@ static int br_dev_stop(struct net_device *dev)
 {
 	struct net_bridge *br = netdev_priv(dev);
 
-	BR_TRACE();
-
 	br_stp_disable_bridge(br);
 	br_multicast_stop(br);
 
@@ -170,8 +163,6 @@ static struct rtnl_link_stats64 *br_get_stats64(struct net_device *dev,
 	struct net_bridge *br = netdev_priv(dev);
 	struct pcpu_sw_netstats tmp, sum = { 0 };
 	unsigned int cpu;
-
-	BR_TRACE();
 
 	for_each_possible_cpu(cpu) {
 		unsigned int start;
@@ -198,7 +189,6 @@ static struct rtnl_link_stats64 *br_get_stats64(struct net_device *dev,
 static int br_change_mtu(struct net_device *dev, int new_mtu)
 {
 	struct net_bridge *br = netdev_priv(dev);
-	BR_TRACE();
 
 	if (new_mtu < 68 || new_mtu > br_min_mtu(br))
 		return -EINVAL;
@@ -218,8 +208,6 @@ static int br_set_mac_address(struct net_device *dev, void *p)
 {
 	struct net_bridge *br = netdev_priv(dev);
 	struct sockaddr *addr = p;
-
-	BR_TRACE();
 
 	if (!is_valid_ether_addr(addr->sa_data))
 		return -EADDRNOTAVAIL;
@@ -328,11 +316,8 @@ void br_netpoll_disable(struct net_bridge_port *p)
 #endif
 
 static int br_add_slave(struct net_device *dev, struct net_device *slave_dev)
-
 {
 	struct net_bridge *br = netdev_priv(dev);
-
-	BR_TRACE();
 
 	return br_add_if(br, slave_dev);
 }
@@ -340,8 +325,6 @@ static int br_add_slave(struct net_device *dev, struct net_device *slave_dev)
 static int br_del_slave(struct net_device *dev, struct net_device *slave_dev)
 {
 	struct net_bridge *br = netdev_priv(dev);
-
-	BR_TRACE();
 
 	return br_del_if(br, slave_dev);
 }
@@ -396,8 +379,6 @@ static struct device_type br_type = {
 void br_dev_setup(struct net_device *dev)
 {
 	struct net_bridge *br = netdev_priv(dev);
-
-	BR_TRACE();
 
 	eth_hw_addr_random(dev);
 	ether_setup(dev);

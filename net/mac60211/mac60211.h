@@ -44,7 +44,7 @@
 #include <linux/skbuff.h>
 #include <linux/jiffies.h>
 
-#include "../bridge/br_private.h"
+#include "../bridge/br_hmc.h"
 
 #define hmc_info(fmt, arg...)						            \
 ({									                            \
@@ -114,13 +114,13 @@ enum ak60211_plink_state {
 };
 
 enum ak60211_mpath_flags {
-	MESH_PATH_ACTIVE = BIT(0),
-	MESH_PATH_RESOLVING = BIT(1),
-	MESH_PATH_SN_VALID = BIT(2),
-	MESH_PATH_FIXED = BIT(3),
-	MESH_PATH_RESOLVED = BIT(4),
-	MESH_PATH_REQ_QUEUED = BIT(5),
-	MESH_PATH_DELETED = BIT(6),
+	PLC_MESH_PATH_ACTIVE = BIT(0),
+	PLC_MESH_PATH_RESOLVING = BIT(1),
+	PLC_MESH_PATH_SN_VALID = BIT(2),
+	PLC_MESH_PATH_FIXED = BIT(3),
+	PLC_MESH_PATH_RESOLVED = BIT(4),
+	PLC_MESH_PATH_REQ_QUEUED = BIT(5),
+	PLC_MESH_PATH_DELETED = BIT(6),
 };
 
 struct ak60211_mpath {
@@ -315,7 +315,9 @@ extern struct net_bridge_hmc *plc;
 extern void cf60211_get_dev(struct net_bridge_hmc *plc);
 extern void plc_fill_ethhdr(u8 *st, const u8 *da, const u8 *sa, u16 type);
 extern void ak60211_mpath_discovery(void);
-extern void ak60211_mpath_queue_preq(const u8 *dst, u32 hmc_sn);
+extern void ak60211_mpath_queue_preq(struct net_bridge_hmc *plc);
+void ak60211_mesh_init(void);
+void ak60211_mesh_exit(void);
 
 extern const u8 broadcast_addr[ETH_ALEN];
 

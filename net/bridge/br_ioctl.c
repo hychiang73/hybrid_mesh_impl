@@ -63,8 +63,6 @@ static int get_fdb_entries(struct net_bridge *br, void __user *userbuf,
 	void *buf;
 	size_t size;
 
-	BR_TRACE();
-
 	/* Clamp size to PAGE_SIZE, test maxnum to avoid overflow */
 	if (maxnum > PAGE_SIZE/sizeof(struct __fdb_entry))
 		maxnum = PAGE_SIZE/sizeof(struct __fdb_entry);
@@ -91,8 +89,6 @@ static int add_del_if(struct net_bridge *br, int ifindex, int isadd)
 	struct net *net = dev_net(br->dev);
 	struct net_device *dev;
 	int ret;
-
-	BR_TRACE();
 
 	if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
 		return -EPERM;
@@ -361,8 +357,6 @@ static int old_deviceless(struct net *net, void __user *uarg)
 
 int br_ioctl_deviceless_stub(struct net *net, unsigned int cmd, void __user *uarg)
 {
-	BR_TRACE();
-
 	switch (cmd) {
 	case SIOCGIFBR:
 	case SIOCSIFBR:
@@ -392,8 +386,6 @@ int br_ioctl_deviceless_stub(struct net *net, unsigned int cmd, void __user *uar
 int br_dev_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
 	struct net_bridge *br = netdev_priv(dev);
-
-	BR_TRACE();
 
 	switch (cmd) {
 	case SIOCDEVPRIVATE:
