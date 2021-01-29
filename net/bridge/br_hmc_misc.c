@@ -64,7 +64,6 @@ void br_hmc_print_skb(struct sk_buff *skb, const char *type, int offset)
 
 			pr_cont("\n");
 		}
-		pr_info("===============================================\n");
 	}
 }
 EXPORT_SYMBOL(br_hmc_print_skb);
@@ -120,11 +119,13 @@ static ssize_t br_hmc_proc_test_read(struct file *filp, char __user *buf, size_t
 
 static ssize_t br_hmc_proc_test_write(struct file *filp, const char *buff, size_t size, loff_t *pos)
 {
-	int count = 0;
+	int i, count = 0;
 	char cmd[512] = {0};
 	char *token = NULL, *cur = NULL;
 	u32 *data = NULL;
-	const u8 da[ETH_ALEN] = {0x00, 0x04, 0x4b, 0xe6, 0xec, 0x3d};
+	u8 da[ETH_ALEN] = {0};
+	struct hmc_path *path;
+	struct nl60211_mesh_info info[HMC_MAX_NODES];
 
 	if ((size - 1) > sizeof(cmd)) {
 		br_hmc_err("ERROR! input length is larger than local buffer\n");
@@ -153,13 +154,57 @@ static ssize_t br_hmc_proc_test_write(struct file *filp, const char *buff, size_
 	br_hmc_info("cmd = %s\n", cmd);
 
 	if (strncmp(cmd, "add_tbl", strlen(cmd)) == 0) {
-		br_hmc_path_add(da);
+		for (i = 0; i < ETH_ALEN; i++)
+			da[i] = data[i+1];
+		path = br_hmc_path_add(da);
+		if (CHECK_MEM(path)) {
+			br_hmc_err("path is not added\n");
+			goto out;
+		}
+		br_hmc_info("path dst = %x.%x.%x.%x.%x.%x\n", path->dst[0],path->dst[1],path->dst[2],
+					path->dst[3],path->dst[4],path->dst[5]);
+		br_hmc_info("path sn = %d\n", path->sn);
+		br_hmc_info("path metric = %d\n", path->metric);
+		br_hmc_info("path flags = %d\n", path->flags);
+		br_hmc_info("path egress = %d\n", path->egress);
+
 	} else if (strncmp(cmd, "del_tbl", strlen(cmd)) == 0) {
-		br_hmc_path_del(da);
+		for (i = 0; i < ETH_ALEN; i++)
+			da[i] = data[i+1];
+		if (br_hmc_path_del(da) < 0)
+			br_hmc_info("failed to delete path\n");
+
 	} else if (strncmp(cmd, "lookup_tbl", strlen(cmd)) == 0) {
-		br_hmc_path_lookup(da);
+		for (i = 0; i < ETH_ALEN; i++)
+			da[i] = data[i+1];
+		path = br_hmc_path_lookup(da);
+		if (CHECK_MEM(path))
+			goto out;
+
+		br_hmc_info("path dst = %x.%x.%x.%x.%x.%x\n", path->dst[0],path->dst[1],path->dst[2],
+					path->dst[3],path->dst[4],path->dst[5]);
+		br_hmc_info("path sn = %d\n", path->sn);
+		br_hmc_info("path metric = %d\n", path->metric);
+		br_hmc_info("path flags = %d\n", path->flags);
+		br_hmc_info("path egress = %d\n", path->egress);
+
+	} else if (strncmp(cmd, "dump_tbl", strlen(cmd)) == 0) {
+		for (i = 0; i < data[1]; i++) {
+			if (br_hmc_path_lookup_by_idx(&info[i], i) < 0) {
+				br_hmc_err("No pathes dummped.\n");
+				break;
+			}
+			br_hmc_info("info dst = %x.%x.%x.%x.%x.%x\n", info[i].dst[0], info[i].dst[1], info[i].dst[2],
+						info[i].dst[3], info[i].dst[4], info[i].dst[5]);
+			br_hmc_info("info sn = %d\n", info[i].sn);
+			br_hmc_info("info metric = %d\n", info[i].metric);
+			br_hmc_info("info flags = %d\n", info[i].flags);
+			br_hmc_info("info egress = %d\n", info[i].egress);
+			br_hmc_info("==================\n");
+		}
 	}
 
+out:
 	kfree(data);
 	return size;
 }

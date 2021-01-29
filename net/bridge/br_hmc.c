@@ -34,23 +34,6 @@
 #include "../mac60211/mac60211.h"
 #include "../mac80211/mhmc.h"
 
-struct hmc_path {
-	u8 dst[ETH_ALEN];
-	struct rhash_head rhash;
-	struct hlist_node walk_list;
-	struct sk_buff_head frame_queue;
-	u32 sn;
-	u32 metric;
-	enum br_hmc_path_flags flags;
-};
-
-struct hmc_table {
-	struct rhashtable rhead;
-	struct hlist_head walk_head;
-	spinlock_t walk_lock;
-	atomic_t entries;
-};
-
 struct hmc_table *htbl = NULL;
 struct net_bridge_hmc br_hmc;
 struct net_device *hmc_local_dev;
@@ -243,9 +226,11 @@ static struct hmc_path *br_hmc_path_new(const u8 *dst, gfp_t gfp_flags)
 
 	memcpy(new_path->dst, dst, ETH_ALEN);
 	skb_queue_head_init(&new_path->frame_queue);
-	new_path->flags = 0;
+
+	new_path->flags = BR_HMC_PATH_INVALID;
 	new_path->sn = 0;
 	new_path->metric = 0;
+	new_path->egress = HMC_PORT_NONE;
 
 	return new_path;
 }
@@ -287,6 +272,32 @@ struct hmc_path *br_hmc_path_add(const u8 *dst)
 	}
 
 	return new_path;
+}
+
+int br_hmc_path_lookup_by_idx(struct nl60211_mesh_info *info, int idx)
+{
+	int i = 0;
+	struct hmc_path *path;
+	struct hlist_node *n2;
+
+	if (CHECK_MEM(info))
+		return -ENOMEM;
+
+	hlist_for_each_entry_safe(path, n2, &htbl->walk_head, walk_list) {
+		if (i++ == idx)
+			break;
+	}
+
+	if (path == NULL)
+		return -ENOMEM;
+
+	memcpy(info->dst, path->dst, ETH_ALEN);
+	info->metric = path->metric;
+	info->sn = path->sn;
+	info->flags = path->flags;
+	info->egress = path->egress;
+
+	return 0;
 }
 
 int br_hmc_path_update(struct net_bridge_hmc *hmc)
