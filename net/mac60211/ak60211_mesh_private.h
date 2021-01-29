@@ -134,13 +134,13 @@ enum ak60211_mpath_frame_type {
 };
 
 enum ak60211_mpath_flags {
-	MESH_PATH_ACTIVE = BIT(0),
-	MESH_PATH_RESOLVING = BIT(1),
-	MESH_PATH_SN_VALID = BIT(2),
-	MESH_PATH_FIXED = BIT(3),
-	MESH_PATH_RESOLVED = BIT(4),
-	MESH_PATH_REQ_QUEUED = BIT(5),
-	MESH_PATH_DELETED = BIT(6),
+	PLC_MESH_PATH_ACTIVE = BIT(0),
+	PLC_MESH_PATH_RESOLVING = BIT(1),
+	PLC_MESH_PATH_SN_VALID = BIT(2),
+	PLC_MESH_PATH_FIXED = BIT(3),
+	PLC_MESH_PATH_RESOLVED = BIT(4),
+	PLC_MESH_PATH_REQ_QUEUED = BIT(5),
+	PLC_MESH_PATH_DELETED = BIT(6),
 };
 
 enum ak60211_mesh_task_flags {
@@ -430,7 +430,7 @@ static inline void ak60211_dev_unlock(struct ak60211_if_data *dev)
     __release(&dev->mtx);
 }*/
 
-extern struct net_bridge_hmc *ak60211_plc;
+extern struct net_bridge_hmc *plc;
 
 extern const struct rhashtable_params ak60211_sta_rht_params;
 extern const struct meshprofhdr local_prof;
@@ -461,5 +461,6 @@ extern int ak60211_mpath_sel_frame_tx(enum ak60211_mpath_frame_type action, u8 f
 
 extern void __ak60211_mpath_queue_preq(struct ak60211_if_data *ifmsh, const u8 *dst, u32 hmc_sn);
 extern void plc_send_beacon(void);
+extern void ak60211_preq_test_wq(struct work_struct *work);
 
 #endif

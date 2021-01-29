@@ -125,9 +125,9 @@ static u32 ak60211_hwmp_route_info_get(struct ak60211_if_data *ifmsh, struct plc
         mpath = ak60211_mpath_lookup(ifmsh, orig_addr);
         if (mpath) {
             spin_lock_bh(&mpath->state_lock);
-            if (mpath->flags & MESH_PATH_FIXED) {
+            if (mpath->flags & PLC_MESH_PATH_FIXED) {
                 fresh_info = false;
-            } else if (mpath->flags & MESH_PATH_ACTIVE || 1) {
+            } else if (mpath->flags & PLC_MESH_PATH_ACTIVE || 1) {
                 if (SN_GT(mpath->sn, orig_sn) ||
                         (mpath->sn == orig_sn &&
                         (rcu_access_pointer(mpath->next_hop) != 
@@ -260,7 +260,7 @@ static void ak60211_hwmp_preq_frame_process(struct ak60211_if_data *ifmsh, struc
         if (mpath) {
             if (SN_LT(mpath->sn, target_sn)) {
                 mpath->sn = target_sn;
-                mpath->flags |= MESH_PATH_SN_VALID;
+                mpath->flags |= PLC_MESH_PATH_SN_VALID;
             }
         }
         rcu_read_unlock();
@@ -371,24 +371,24 @@ void ak60211_mpath_start_discovery(struct ak60211_if_data *ifmsh)
     }
 
     spin_lock_bh(&mpath->state_lock);
-    if (mpath->flags & (MESH_PATH_DELETED | MESH_PATH_FIXED)) {
+    if (mpath->flags & (PLC_MESH_PATH_DELETED | PLC_MESH_PATH_FIXED)) {
         spin_unlock_bh(&mpath->state_lock);
         goto enddiscovery;
     }
-    mpath->flags &= ~MESH_PATH_REQ_QUEUED;
+    mpath->flags &= ~PLC_MESH_PATH_REQ_QUEUED;
     if (preq_node->flags & AK60211_PREQ_START) {
-        if (mpath->flags & MESH_PATH_RESOLVING) {
+        if (mpath->flags & PLC_MESH_PATH_RESOLVING) {
             spin_unlock_bh(&mpath->state_lock);
             goto enddiscovery;
         } else {
-            mpath->flags &= ~MESH_PATH_RESOLVED;
-            mpath->flags |= MESH_PATH_RESOLVING;
+            mpath->flags &= ~PLC_MESH_PATH_RESOLVED;
+            mpath->flags |= PLC_MESH_PATH_RESOLVING;
             mpath->discovery_retries = 0;
             mpath->discovery_timeout = msecs_to_jiffies(ifmsh->mshcfg.min_discovery_timeout);
         }
-    } else if (!(mpath->flags & MESH_PATH_RESOLVING) || 
-            mpath->flags & MESH_PATH_RESOLVED) {
-        mpath->flags &= ~MESH_PATH_RESOLVING;
+    } else if (!(mpath->flags & PLC_MESH_PATH_RESOLVING) || 
+            mpath->flags & PLC_MESH_PATH_RESOLVED) {
+        mpath->flags &= ~PLC_MESH_PATH_RESOLVING;
         spin_unlock_bh(&mpath->state_lock);
         goto enddiscovery;
     }
@@ -420,7 +420,7 @@ void ak60211_mpath_start_discovery(struct ak60211_if_data *ifmsh)
                     mpath->sn, da, 0, ttl, lifetime, 0, ifmsh->preq_id++, ifmsh->addr);*/
     
     spin_lock_bh(&mpath->state_lock);
-    if (mpath->flags & MESH_PATH_DELETED) {
+    if (mpath->flags & PLC_MESH_PATH_DELETED) {
         spin_unlock_bh(&mpath->state_lock);
         goto enddiscovery;
     }

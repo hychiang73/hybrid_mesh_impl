@@ -43,7 +43,7 @@ extern bool br_hmc_debug;
 #define BR_TRACE()													\
 do {																\
 	if (br_hmc_debug)												\
-	hmc_info("%s\n", __func__);										\
+	br_hmc_info("%s\n", __func__);										\
 } while (0)
 
 enum br_hmc_path_flags {

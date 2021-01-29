@@ -17,9 +17,9 @@ static const struct rhashtable_params ak60211_mesh_rht_params = {
 
 static inline bool ak60211_mpath_expired(struct ak60211_mesh_path *mpath)
 {
-    return (mpath->flags & MESH_PATH_ACTIVE) &&
+    return (mpath->flags & PLC_MESH_PATH_ACTIVE) &&
             time_after(jiffies, mpath->exp_time) &&
-            !(mpath->flags & MESH_PATH_FIXED);
+            !(mpath->flags & PLC_MESH_PATH_FIXED);
 }
 
 inline bool ak60211_mplink_availables(struct ak60211_if_data *ifmsh)
@@ -184,7 +184,7 @@ static void ak60211_mpath_free_rcu(struct ak60211_mesh_table *tbl, struct ak6021
     struct ak60211_if_data *ifmsh = mpath->sdata;
 
     spin_lock_bh(&mpath->state_lock);
-    mpath->flags |= MESH_PATH_RESOLVING | MESH_PATH_DELETED;
+    mpath->flags |= PLC_MESH_PATH_RESOLVING | PLC_MESH_PATH_DELETED;
     spin_unlock_bh(&mpath->state_lock);
     del_timer_sync(&mpath->timer);
     atomic_dec(&ifmsh->mpaths);
@@ -211,8 +211,8 @@ void ak60211_mtbl_expire(struct ak60211_if_data *ifmsh)
     spin_lock_bh(&tbl->walk_lock);
     
     hlist_for_each_entry_safe(mpath, n, &tbl->walk_head, walk_list) {
-        if ((!(mpath->flags & MESH_PATH_RESOLVING)) &&
-            (!(mpath->flags & MESH_PATH_FIXED)) &&
+        if ((!(mpath->flags & PLC_MESH_PATH_RESOLVING)) &&
+            (!(mpath->flags & PLC_MESH_PATH_FIXED)) &&
              time_after(jiffies, mpath->exp_time + MESH_PATH_EXPIRE)) {
             __ak60211_mpath_del(tbl, mpath);
         }
@@ -376,7 +376,7 @@ struct ak60211_mesh_path *ak60211_mpath_lookup(struct ak60211_if_data *ifmsh, co
 
     if (mpath && ak60211_mpath_expired(mpath)) {
         spin_lock_bh(&mpath->state_lock);
-        mpath->flags &= ~MESH_PATH_ACTIVE;
+        mpath->flags &= ~PLC_MESH_PATH_ACTIVE;
         spin_unlock_bh(&mpath->state_lock);
     }
 
