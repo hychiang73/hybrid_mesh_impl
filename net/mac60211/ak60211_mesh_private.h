@@ -43,13 +43,11 @@
 #include "../bridge/br_private.h"
 #include "mac60211.h"
 
-#define PLC_DBG     (0)
 
-#if (PLC_DBG)
-#define plc_info(fmt, arg...)						            \
-({									                            \
-	pr_info("PLC: (%s, %d): " fmt, __func__, __LINE__, ##arg);	\
-})									                            \
+#define plc_info(fmt, arg...)           						            \
+({				            					                            \
+   if(plc_dbg) pr_info("PLC: (%s, %d): " fmt, __func__, __LINE__, ##arg);	\
+})									                                        \
 
 #define plc_err(fmt, arg...)						            \
 ({									                            \
@@ -57,16 +55,12 @@
 })									                            \
 
 #define PLC_TRACE()     plc_info("%s\n", __func__);
-#else
-#define plc_info(fmt, arg...)   
-#define plc_err(fmt, arg...)    
-#define PLC_TRACE() 
-#endif
 
 #ifndef __packed
 #define __packed __attribute__((packed))
 #endif
 
+#define MAX_PREQ_QUEUE_LEN	64
 #define SBEACON_DELAY       2000
 #define AK60211_MESH_HWMP_PATH_TIMEOUT  3000
 #define MAX_MESH_TTL    31
@@ -431,6 +425,7 @@ static inline void ak60211_dev_unlock(struct ak60211_if_data *dev)
 }*/
 
 extern struct net_bridge_hmc *plc;
+extern bool plc_dbg;
 
 extern const struct rhashtable_params ak60211_sta_rht_params;
 extern const struct meshprofhdr local_prof;
@@ -462,5 +457,7 @@ extern int ak60211_mpath_sel_frame_tx(enum ak60211_mpath_frame_type action, u8 f
 extern void __ak60211_mpath_queue_preq(struct ak60211_if_data *ifmsh, const u8 *dst, u32 hmc_sn);
 extern void plc_send_beacon(void);
 extern void ak60211_preq_test_wq(struct work_struct *work);
+extern void ak60211_mpath_queue_preq_new(struct hmc_hybrid_path *hmpath);
+extern int __ak60211_mpath_queue_preq_new(struct ak60211_if_data *ifmsh, struct hmc_hybrid_path *hmpath, u8 flags);
 
 #endif

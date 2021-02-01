@@ -102,6 +102,9 @@ void ak60211_pkt_hex_dump(struct sk_buff *skb, const char* type, int offset)
         int li = 0;
         u8 *data, ch; 
 
+        if (!plc_dbg) {
+            return;
+        }
         data = (u8 *) skb_mac_header(skb);
        //data = (u8 *) skb->head;
 
@@ -277,6 +280,7 @@ int ak60211_mpath_sel_frame_tx(enum ak60211_mpath_frame_type action, u8 flags, c
     int hdr_len = sizeof(struct ethhdr) + sizeof(struct plc_hdr);
     u8 sa[ETH_ALEN];
 
+    PLC_TRACE();
     switch(action) {
         case AK60211_MPATH_PREQ:
             hdr_len += sizeof(struct preq_pkts);
@@ -297,7 +301,7 @@ int ak60211_mpath_sel_frame_tx(enum ak60211_mpath_frame_type action, u8 flags, c
    
     memcpy(sa, ifmsh->addr, ETH_ALEN);
     pos = skb_put_zero(skb, hdr_len);
-    plc_fill_ethhdr(pos, da, orig_addr, ntohs(0xAA55));
+    plc_fill_ethhdr(pos, da, ifmsh->addr, ntohs(0xAA55));
 
     plcpkts = (struct plc_packet_union *)pos;
     plcpkts->plchdr.framectl = cpu_to_le16(AK60211_FTYPE_MGMT |
@@ -637,6 +641,12 @@ void ak60211_preq_test_wq(struct work_struct *work)
     br_hmc_path_update(plc);
 }
 
+void ak60211_mpath_queue_preq_new(struct hmc_hybrid_path *hmpath)
+{
+    __ak60211_mpath_queue_preq_new(&plcdev, hmpath, AK60211_PREQ_START);
+}
+
+
 void ak60211_mpath_queue_preq(const u8 *dst, u32 hmc_sn)
 {
     __ak60211_mpath_queue_preq(&plcdev, dst, hmc_sn);
@@ -664,7 +674,8 @@ void ak60211_iface_work(struct work_struct *work)
         goto out;
     }
 
-    if (ifmsh->preq_queue_len && time_after(jiffies, ifmsh->last_preq + msecs_to_jiffies(ifmsh->mshcfg.MeshHWMPpreqMinInterval))) {
+    if (ifmsh->preq_queue_len && time_after(jiffies,
+                ifmsh->last_preq + msecs_to_jiffies(ifmsh->mshcfg.MeshHWMPpreqMinInterval))) {
         ak60211_mpath_start_discovery(ifmsh);
     }
 

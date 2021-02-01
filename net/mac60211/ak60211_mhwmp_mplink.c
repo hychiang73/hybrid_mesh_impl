@@ -62,6 +62,71 @@ ak60211_next_hop_deref_protected(struct ak60211_mesh_path *mpath)
 					 lockdep_is_held(&mpath->state_lock));
 }
 
+int __ak60211_mpath_queue_preq_new(struct ak60211_if_data *ifmsh, struct hmc_hybrid_path *hmpath, u8 flags)
+{
+    struct ak60211_mesh_path *mpath;
+    struct ak60211_mesh_preq_queue *preq_node;
+    u8 *target_addr = hmpath->dst;
+
+    PLC_TRACE();
+    mpath = ak60211_mpath_lookup(ifmsh, target_addr);
+    if (!mpath) {
+        mpath = ak60211_mpath_add(ifmsh, target_addr);
+        if (IS_ERR(mpath)) {
+            /* mesh_path_discard_frame*/;
+            return PTR_ERR(mpath);
+        }
+    }
+
+    if (mpath->flags & PLC_MESH_PATH_RESOLVING) {
+        return false;
+    }
+
+    preq_node = kmalloc(sizeof(struct ak60211_mesh_preq_queue), GFP_ATOMIC);
+    if (!preq_node) {
+        return false;
+    }
+
+    spin_lock_bh(&ifmsh->mesh_preq_queue_lock);
+    if (ifmsh->preq_queue_len == MAX_PREQ_QUEUE_LEN) {
+        spin_unlock_bh(&ifmsh->mesh_preq_queue_lock);
+        kfree(preq_node);
+        return false;
+    }
+
+    spin_lock(&mpath->state_lock);
+    if (mpath->flags & PLC_MESH_PATH_REQ_QUEUED) {
+        spin_unlock(&mpath->state_lock);
+        spin_unlock_bh(&ifmsh->mesh_preq_queue_lock);
+        kfree(preq_node);
+        return false;
+    }
+
+    mpath->sn = hmpath->sn;
+    memcpy(preq_node->dst, mpath->dst, ETH_ALEN);
+    preq_node->flags = flags;
+
+    mpath->flags |= PLC_MESH_PATH_REQ_QUEUED;
+    spin_unlock(&mpath->state_lock);
+
+    list_add_tail(&preq_node->list, &ifmsh->preq_queue.list);
+    ++ifmsh->preq_queue_len;
+    spin_unlock_bh(&ifmsh->mesh_preq_queue_lock);
+
+    if (time_after(jiffies, ifmsh->last_preq +
+                msecs_to_jiffies(ifmsh->mshcfg.MeshHWMPpreqMinInterval))) {
+        queue_work(ifmsh->workqueue, &ifmsh->work);
+    } else if (time_before(jiffies, ifmsh->last_preq)) {
+        ifmsh->last_preq = jiffies - msecs_to_jiffies(ifmsh->mshcfg.MeshHWMPpreqMinInterval) - 1;
+        queue_work(ifmsh->workqueue, &ifmsh->work);
+    } else {
+        mod_timer(&ifmsh->mesh_path_timer, ifmsh->last_preq + msecs_to_jiffies(ifmsh->mshcfg.MeshHWMPpreqMinInterval));
+    }
+
+    return true;
+}
+
+
 static u32 ak60211_plc_link_metric_get(struct ak60211_sta_info *sta)
 {
     return 10;
@@ -146,10 +211,26 @@ static u32 ak60211_hwmp_route_info_get(struct ak60211_if_data *ifmsh, struct plc
         }
 
         if (fresh_info) {
-            ;/* todo: fresh_info for originator frame and transmitter frame */
-        }
+            /* todo: fresh_info for originator frame and transmitter frame */
+            rcu_assign_pointer(mpath->next_hop, sta);
+            mpath->flags |= PLC_MESH_PATH_SN_VALID;
+            mpath->metric = new_metric;
+            mpath->sn = orig_sn;
+            mpath->exp_time = time_after(mpath->exp_time, exp_time)? mpath->exp_time : exp_time;
+            mpath->hop_count = hopcount;
+            mpath->flags |= PLC_MESH_PATH_ACTIVE | PLC_MESH_PATH_RESOLVED;
+            spin_unlock_bh(&mpath->state_lock);
+            /* todo: ewma_mesh_fail_avg */
 
-        spin_unlock_bh(&mpath->state_lock);
+            /* information for BR-HMC */
+            plc->path->flags = mpath->flags;
+            plc->path->sn = mpath->sn;
+            plc->path->metric = mpath->metric;
+            plc_info("flags:%x, sn:%x, metric:%x", mpath->flags, mpath->sn, mpath->metric);
+            br_hmc_path_update(plc);
+        } else {
+            spin_unlock_bh(&mpath->state_lock);
+        }
     }
 
     rcu_read_unlock();
@@ -350,6 +431,7 @@ void ak60211_mpath_start_discovery(struct ak60211_if_data *ifmsh)
     u32 lifetime;
 
     PLC_TRACE();
+
     /* preq queue is nothing or time period is smaller than min interval */
     spin_lock_bh(&ifmsh->mesh_preq_queue_lock);
     if (!ifmsh->preq_queue_len || 
@@ -363,6 +445,7 @@ void ak60211_mpath_start_discovery(struct ak60211_if_data *ifmsh)
             struct ak60211_mesh_preq_queue, list);
     list_del(&preq_node->list);
     --ifmsh->preq_queue_len;
+    spin_unlock_bh(&ifmsh->mesh_preq_queue_lock);
 
     rcu_read_lock();
     mpath = ak60211_mpath_lookup(ifmsh, preq_node->dst);
@@ -415,16 +498,15 @@ void ak60211_mpath_start_discovery(struct ak60211_if_data *ifmsh)
 
     spin_unlock_bh(&mpath->state_lock);
     da = broadcast_addr;
-    /* todo: need to add
-     * ak60211_mpath_sel_frame_tx(AK60211_MPATH_PREQ, 0, ifmsh->addr, ifmsh->sn, mpath->dst,
-                    mpath->sn, da, 0, ttl, lifetime, 0, ifmsh->preq_id++, ifmsh->addr);*/
+    ak60211_mpath_sel_frame_tx(AK60211_MPATH_PREQ, 0, ifmsh->addr, ifmsh->sn, mpath->dst,
+                    mpath->sn, da, 0, ttl, lifetime, 0, ifmsh->preq_id++, ifmsh);
     
     spin_lock_bh(&mpath->state_lock);
     if (mpath->flags & PLC_MESH_PATH_DELETED) {
         spin_unlock_bh(&mpath->state_lock);
         goto enddiscovery;
     }
-    mod_timer(&mpath->timer, jiffies + mpath->discovery_timeout);
+    //mod_timer(&mpath->timer, jiffies + mpath->discovery_timeout);
     spin_unlock_bh(&mpath->state_lock);
 
 enddiscovery:

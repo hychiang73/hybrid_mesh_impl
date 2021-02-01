@@ -4,6 +4,8 @@
 #include "nl60211.h"
 #include "../net/bridge/br_hmc.h"
 
+bool plc_dbg = false;
+
 struct net_bridge_hmc *plc;
 struct proc_dir_entry *proc_dir_plc;
 /* work queue */
@@ -16,6 +18,7 @@ static struct delayed_work sbeacon_work;
 static ssize_t plc_proc_test_read(struct file *pfile, char __user *buf, size_t size, loff_t *pos);
 static ssize_t plc_proc_test_write(struct file *pfile, const char *buf, size_t size, loff_t *pos);
 static int plc_br_hmc_rx(struct sk_buff *skb);
+void ak60211_mpath_queue_preq_ops(struct net_bridge_hmc *h);
 void plc_pkt_hex_dump(struct sk_buff *skb, const char* type, int offset);
 
 struct file_operations proc_plc_fops = {
@@ -25,7 +28,7 @@ struct file_operations proc_plc_fops = {
 
 struct net_bridge_hmc_ops plc_br_hmc_ops = {
     .rx = plc_br_hmc_rx,
-    .queue_preq = ak60211_mpath_queue_preq_test,
+    .queue_preq = ak60211_mpath_queue_preq_ops,//ak60211_mpath_queue_preq_test,
 };
 
 static int plc_br_hmc_rx(struct sk_buff *skb)
@@ -67,6 +70,11 @@ void ak60211_mpath_queue_preq_test(struct net_bridge_hmc *h)
 
     /* create a workqueue to handle prep */
     schedule_work(&preq_work);
+}
+
+void ak60211_mpath_queue_preq_ops(struct net_bridge_hmc *h)
+{
+    ak60211_mpath_queue_preq_new(h->path);
 }
 
 static void plc_sbeacon_wq(struct work_struct *work)
@@ -138,9 +146,20 @@ static ssize_t plc_proc_test_write(struct file *pfile, const char *ubuf, size_t 
     }
 
     if (!memcmp(buf, "preq", size-1)) {
-        ak60211_mpath_queue_preq(jetson2, ++hmc_sn);
+        // ak60211_mpath_queue_preq(jetson2, ++hmc_sn);
+        memcpy(plc->path->dst, jetson2, ETH_ALEN);
+        plc->path->sn = ++hmc_sn;
+        ak60211_mpath_queue_preq_ops(plc);
     }
 
+    if (!memcmp(buf, "debug", size-1)) {
+        plc_dbg = !plc_dbg;
+        if (plc_dbg) {
+            pr_info("PLC: (%s, %d): plc_dbg on", __func__, __LINE__);
+        } else {
+            pr_info("PLC: (%s, %d): plc_dbg off", __func__, __LINE__);
+        }
+    }
     return size;
 }
 
