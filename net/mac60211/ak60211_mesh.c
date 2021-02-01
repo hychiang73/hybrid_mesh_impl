@@ -471,10 +471,10 @@ int ak60211_rx_handler(struct sk_buff *pskb)
             break;
     }
 
-    return 0;
+    return NF_ACCEPT;
 
 drop:
-    return -1;
+    return NF_DROP;
 }
 
 static int ak60211_sta_info_init(struct ak60211_if_data *ifmsh)

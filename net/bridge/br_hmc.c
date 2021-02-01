@@ -438,6 +438,8 @@ int br_hmc_rx_handler(struct sk_buff *skb)
 
 	mutex_unlock(&call_rx);
 
+	br_hmc_dbg("ak60211 drop = %d\n", ret);
+
 	if (ret == NF_DROP)
 		return 0;
 
