@@ -81,7 +81,7 @@ static int ak60211_sta_info_insert_finish(struct ak60211_sta_info *sta)
     /* check if STA exists already */
     if (mesh_info(local, sta->addr)) {
         err = -EEXIST;
-        plc_err("STA %pM exists already", sta->addr);
+        plc_err("STA %pM exists already\n", sta->addr);
         goto out_err;
     }
 
@@ -90,13 +90,13 @@ static int ak60211_sta_info_insert_finish(struct ak60211_sta_info *sta)
 
     err = ak60211_sta_info_hash_add(local, sta);
     if (err) {
-        plc_err("STA %pM hash add fail", sta->addr);
+        plc_err("STA %pM hash add fail\n", sta->addr);
         goto out_drop_sta;
     }
 
     list_add_tail_rcu(&sta->list, &local->sta_list);
 
-    pr_info("Inserted STA %pM\n", sta->addr);
+    plc_info("Inserted STA %pM\n", sta->addr);
     mutex_unlock(&local->sta_mtx);
 
     ak60211_mplinks_update(local);
@@ -159,11 +159,11 @@ struct ak60211_sta_info* mesh_sta_info_get(struct ak60211_if_data *ifmsh, u8 *ad
     if (sta) {
         ak60211_mesh_sta_init(sta);
     } else {
-        plc_info("sta is not exist, alloc new sta");
+        plc_info("sta is not exist, alloc new sta\n");
         sta = ak60211_mesh_sta_alloc(ifmsh, addr);
 
         if (!sta) {
-            plc_err("mesh sta alloc fail");
+            plc_err("mesh sta alloc fail\n");
             return NULL;
         }
 
@@ -195,11 +195,17 @@ static void ak60211_mpath_free_rcu(struct ak60211_mesh_table *tbl, struct ak6021
 static void __ak60211_mpath_del(struct ak60211_mesh_table *tbl, struct ak60211_mesh_path *mpath)
 {
     PLC_TRACE();
-    
+
+    memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
+    plc->path->flags = 0;
+    plc->path->sn = 0;//mpath->sn;
+    plc->path->metric = 0;//MAX_METRIC;
+    plc_debug("mpath del, inform br-hmc to update status\n");
+    br_hmc_path_update(plc);
+
     hlist_del_rcu(&mpath->walk_list);
     rhashtable_remove_fast(&tbl->rhead, &mpath->rhash, ak60211_mesh_rht_params);
     ak60211_mpath_free_rcu(tbl, mpath);
-    
 }
 
 void ak60211_mtbl_expire(struct ak60211_if_data *ifmsh)
@@ -260,7 +266,7 @@ static struct ak60211_sta_info *__ak60211_mesh_sta_alloc(struct ak60211_if_data 
      * todo: sta_info_pre_move_state(STA_AUTH, STA_ASSOC, STA_AUTHORIZED)
      * */
 
-    plc_info("Allocated STA %pM\n", sta->addr);
+    plc_debug("Allocated STA %pM\n", sta->addr);
     return sta;
 }
 
@@ -299,11 +305,46 @@ static struct ak60211_mesh_table *ak60211_mtbl_alloc(void)
     return newtbl;
 }
 
+void ak60211_mpath_timer(struct timer_list *t)
+{
+    struct ak60211_mesh_path *mpath = from_timer(mpath, t, timer);
+    struct ak60211_if_data *ifmsh = mpath->sdata;
+
+    PLC_TRACE();
+    spin_lock_bh(&mpath->state_lock);
+    if (mpath->flags & PLC_MESH_PATH_RESOLVED ||
+            (!(mpath->flags & PLC_MESH_PATH_RESOLVING))) {
+        mpath->flags &= ~(PLC_MESH_PATH_RESOLVING | PLC_MESH_PATH_RESOLVING);
+        spin_unlock_bh(&mpath->state_lock);
+    } else if (mpath->discovery_retries < ifmsh->mshcfg.MeshHWMPmaxPREQretries) {
+        struct hmc_hybrid_path hmpath;
+        memcpy(hmpath.dst, mpath->dst, ETH_ALEN);
+        hmpath.sn = mpath->sn;
+        ++mpath->discovery_retries;
+        mpath->discovery_timeout *= 2;
+        mpath->flags &= ~PLC_MESH_PATH_REQ_QUEUED;
+        spin_unlock_bh(&mpath->state_lock);
+        __ak60211_mpath_queue_preq_new(ifmsh, &hmpath, 0);
+    } else {
+        mpath->flags &= ~(PLC_MESH_PATH_RESOLVING |
+                    PLC_MESH_PATH_RESOLVED | PLC_MESH_PATH_REQ_QUEUED);
+        mpath->exp_time = jiffies;
+
+        memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
+        plc->path->flags = mpath->flags;
+        plc->path->sn = mpath->sn;
+        plc->path->metric = MAX_METRIC;
+        plc_debug("mpath discovery retry max, stop send preq\n");
+        br_hmc_path_update(plc);
+        spin_unlock_bh(&mpath->state_lock);
+    }
+}
+
 static struct ak60211_mesh_path *ak60211_mpath_new(struct ak60211_if_data *ifmsh, const u8 *dst, gfp_t gfp)
 {
     struct ak60211_mesh_path *new_mpath;
-    new_mpath = kzalloc(sizeof(struct ak60211_mesh_path), gfp);
 
+    new_mpath = kzalloc(sizeof(struct ak60211_mesh_path), gfp);
     if (!new_mpath) {
         return NULL;
     }
@@ -314,7 +355,8 @@ static struct ak60211_mesh_path *ak60211_mpath_new(struct ak60211_if_data *ifmsh
     new_mpath->sdata = ifmsh;
     new_mpath->flags = 0;
     new_mpath->exp_time = jiffies;
-    // todo: timer_setup (mesh_path_timer)
+    spin_lock_init(&new_mpath->state_lock);
+    timer_setup(&new_mpath->timer, ak60211_mpath_timer, 0);
 
     return new_mpath;
 }
@@ -325,23 +367,23 @@ struct ak60211_mesh_path *ak60211_mpath_add(struct ak60211_if_data *ifmsh, const
     struct ak60211_mesh_table *tbl;
 
     if (ether_addr_equal(dst, ifmsh->addr)) {
-        plc_err("dst is equal to us no support");
+        plc_err("dst is equal to us no support\n");
         return false;
     }
 
     if (is_multicast_ether_addr(dst)) {
-        plc_err("dst is multicast no support");
+        plc_err("dst is multicast no support\n");
         return false;
     }
 
     if (atomic_add_unless(&ifmsh->mpaths, 1, MESH_MAX_PATHS) == 0) {
-        plc_err("mpath is no free available");
+        plc_err("mpath is no free available\n");
         return false;
     }
 
     new_mpath = ak60211_mpath_new(ifmsh, dst, GFP_ATOMIC);
     if (!new_mpath) {
-        plc_err("mpath allocate fail");
+        plc_err("mpath allocate fail\n");
         return false;
     }
 

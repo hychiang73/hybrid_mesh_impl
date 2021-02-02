@@ -202,7 +202,7 @@ void ak60211_mesh_plink_frame_tx(struct ak60211_if_data *ifmsh, enum ieee80211_s
     nskb = dev_alloc_skb(2 + ETH_HLEN +
             42 + 79 + 4 + 2);
     if (!nskb) {
-        plc_err("no space to allocate");
+        plc_err("no space to allocate\n");
         return;
     }
 
@@ -450,14 +450,14 @@ int ak60211_rx_handler(struct sk_buff *pskb)
         case AK60211_FTYPE_MGMT:
             switch(stype) {
                 case AK60211_STYPE_BEACON:
-                    plc_info("S_BEACON");
+                    plc_info("S_BEACON\n");
                     ak60211_mesh_bcn_presp(plcbuff, &plcdev);
                     break;
                 case AK60211_STYPE_PROBE_RESP:
-                    plc_info("S_PROBE_RESP");
+                    plc_info("S_PROBE_RESP\n");
                     break;
                 case AK60211_STYPE_ACTION:
-                    plc_info("S_ACTION");
+                    plc_info("S_ACTION\n");
                     ak60211_mesh_rx_mgmt_action(plcbuff);
                     break;
             }
@@ -469,7 +469,7 @@ int ak60211_rx_handler(struct sk_buff *pskb)
             switch(stype) {
                 case AK60211_STYPE_QOSDATA:
 
-                    plc_info("S_QOSDATA");
+                    plc_info("S_QOSDATA\n");
                     break;
             }
             break;
@@ -587,7 +587,7 @@ void plc_send_beacon(void)
     // beacon packet size is 92 bytes
     nskb = dev_alloc_skb(2 + beacon_len + 2);
     if (!nskb) {
-        plc_err("no space to allocate");
+        plc_err("no space to allocate\n");
         return;
     }
 
@@ -623,7 +623,7 @@ void ak60211_preq_test_wq(struct work_struct *work)
     if (!mpath) {
         mpath = ak60211_mpath_add(&plcdev, plc->path->dst);
         if (!mpath) {
-            plc_err("mpath build up fail");
+            plc_err("mpath build up fail\n");
             return;
         }
     }
@@ -654,7 +654,7 @@ void ak60211_mpath_queue_preq(const u8 *dst, u32 hmc_sn)
 
 static void ak60211_mesh_housekeeping(struct ak60211_if_data *ifmsh)
 {
-    PLC_TRACE();
+    //PLC_TRACE();
     
     if (ifmsh->mshcfg.plink_timeout > 0) {
         ak60211_sta_expire(ifmsh, ifmsh->mshcfg.plink_timeout * HZ);
@@ -723,7 +723,7 @@ bool ak60211_mesh_init(u8 *id, u8 *mac)
 
     id_len = strlen(id);
     if (id_len >= MAX_MESH_ID_LEN) {
-       plc_err("mesh id len is too long");
+       plc_err("mesh id len is too long\n");
        return false;
     }
     plc_info("plc interface addr is %pM\n", plcdev.addr);

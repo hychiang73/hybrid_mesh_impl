@@ -43,7 +43,7 @@ void __ak60211_mpath_queue_preq(struct ak60211_if_data *ifmsh, const u8 *dst, u3
     if (!mpath) {
         mpath = ak60211_mpath_add(ifmsh, dst);
         if (!mpath) {
-            plc_err("mpath build up fail");
+            plc_err("mpath build up fail\n");
             return;
         }
     }
@@ -74,16 +74,14 @@ int __ak60211_mpath_queue_preq_new(struct ak60211_if_data *ifmsh, struct hmc_hyb
         mpath = ak60211_mpath_add(ifmsh, target_addr);
         if (IS_ERR(mpath)) {
             /* mesh_path_discard_frame*/;
+            plc_err("is_err\n");
             return PTR_ERR(mpath);
         }
     }
 
-    if (mpath->flags & PLC_MESH_PATH_RESOLVING) {
-        return false;
-    }
-
     preq_node = kmalloc(sizeof(struct ak60211_mesh_preq_queue), GFP_ATOMIC);
     if (!preq_node) {
+        plc_err("alloc preq_node fail\n");
         return false;
     }
 
@@ -91,6 +89,7 @@ int __ak60211_mpath_queue_preq_new(struct ak60211_if_data *ifmsh, struct hmc_hyb
     if (ifmsh->preq_queue_len == MAX_PREQ_QUEUE_LEN) {
         spin_unlock_bh(&ifmsh->mesh_preq_queue_lock);
         kfree(preq_node);
+        plc_err("preq_queue full\n");
         return false;
     }
 
@@ -99,6 +98,7 @@ int __ak60211_mpath_queue_preq_new(struct ak60211_if_data *ifmsh, struct hmc_hyb
         spin_unlock(&mpath->state_lock);
         spin_unlock_bh(&ifmsh->mesh_preq_queue_lock);
         kfree(preq_node);
+        plc_err("PATH_QUEUED: %d\n", mpath->flags);
         return false;
     }
 
@@ -192,7 +192,7 @@ static u32 ak60211_hwmp_route_info_get(struct ak60211_if_data *ifmsh, struct plc
             spin_lock_bh(&mpath->state_lock);
             if (mpath->flags & PLC_MESH_PATH_FIXED) {
                 fresh_info = false;
-            } else if (mpath->flags & PLC_MESH_PATH_ACTIVE || 1) {
+            } else if (mpath->flags & PLC_MESH_PATH_ACTIVE) {
                 if (SN_GT(mpath->sn, orig_sn) ||
                         (mpath->sn == orig_sn &&
                         (rcu_access_pointer(mpath->next_hop) != 
@@ -223,10 +223,11 @@ static u32 ak60211_hwmp_route_info_get(struct ak60211_if_data *ifmsh, struct plc
             /* todo: ewma_mesh_fail_avg */
 
             /* information for BR-HMC */
+            memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
             plc->path->flags = mpath->flags;
             plc->path->sn = mpath->sn;
             plc->path->metric = mpath->metric;
-            plc_info("flags:%x, sn:%x, metric:%x", mpath->flags, mpath->sn, mpath->metric);
+            plc_debug("flags:0x%x, sn:0x%x, metric:0x%x\n", plc->path->flags, plc->path->sn, plc->path->metric);
             br_hmc_path_update(plc);
         } else {
             spin_unlock_bh(&mpath->state_lock);
@@ -260,7 +261,7 @@ static void ak60211_hwmp_prep_frame_process(struct ak60211_if_data *ifmsh, struc
 
     ttl = buff->un.prep.elem.ttl;
     if (ttl <= 1) {
-        plc_info("ttl <= 1, dropped frame");
+        plc_info("ttl <= 1, dropped frame\n");
         return;
     }
 
@@ -387,14 +388,14 @@ void ak60211_mesh_rx_path_sel_frame(struct ak60211_if_data *ifmsh, struct plc_pa
 
     sta = mesh_info(ifmsh, buff->plchdr.machdr.h_addr2);
     if (!sta || sta->plink_state != AK60211_PLINK_ESTAB) {
-        plc_err("no sta %pM info or sta->plink_state != ESTAB", buff->plchdr.machdr.h_addr2);
+        plc_err("no sta %pM info or sta->plink_state != ESTAB\n", buff->plchdr.machdr.h_addr2);
         return;
     }
 
     switch(tag) {
         case WLAN_EID_PREQ:
             if (buff->un.preq.elem.len != 37) {
-                plc_err("preq elem len is not 37");
+                plc_err("preq elem len is not 37\n");
                 return;
             }
             path_metric = ak60211_hwmp_route_info_get(ifmsh, buff, AK60211_MPATH_PREQ);
@@ -405,7 +406,7 @@ void ak60211_mesh_rx_path_sel_frame(struct ak60211_if_data *ifmsh, struct plc_pa
             break;
         case WLAN_EID_PREP:
             if (buff->un.prep.elem.len != 31) {
-                plc_err("prep elem len is not 31");
+                plc_err("prep elem len is not 31\n");
                 return;
             }
 
@@ -416,7 +417,7 @@ void ak60211_mesh_rx_path_sel_frame(struct ak60211_if_data *ifmsh, struct plc_pa
             }
             break;
         default:
-            plc_err("tag not found");
+            plc_err("tag not found\n");
             break;
     }
 }
@@ -450,6 +451,7 @@ void ak60211_mpath_start_discovery(struct ak60211_if_data *ifmsh)
     rcu_read_lock();
     mpath = ak60211_mpath_lookup(ifmsh, preq_node->dst);
     if (!mpath) {
+        plc_err("mpath lookup fail\n");
         goto enddiscovery;
     }
 
@@ -498,6 +500,14 @@ void ak60211_mpath_start_discovery(struct ak60211_if_data *ifmsh)
 
     spin_unlock_bh(&mpath->state_lock);
     da = broadcast_addr;
+
+    memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
+    plc->path->flags = mpath->flags;
+    plc->path->sn = mpath->sn;
+    plc->path->metric = MAX_METRIC;
+    plc_debug("flags:0x%x, sn:0x%x, metric:0x%x\n", plc->path->flags, plc->path->sn, plc->path->metric);
+    br_hmc_path_update(plc);
+
     ak60211_mpath_sel_frame_tx(AK60211_MPATH_PREQ, 0, ifmsh->addr, ifmsh->sn, mpath->dst,
                     mpath->sn, da, 0, ttl, lifetime, 0, ifmsh->preq_id++, ifmsh);
     
@@ -506,7 +516,7 @@ void ak60211_mpath_start_discovery(struct ak60211_if_data *ifmsh)
         spin_unlock_bh(&mpath->state_lock);
         goto enddiscovery;
     }
-    //mod_timer(&mpath->timer, jiffies + mpath->discovery_timeout);
+    mod_timer(&mpath->timer, jiffies + mpath->discovery_timeout);
     spin_unlock_bh(&mpath->state_lock);
 
 enddiscovery:
@@ -577,7 +587,7 @@ int ak60211_mesh_match_local(struct meshprofhdr *peer)
         peer->meshconf_elem.congestion_ctrl_mode == local_prof.meshconf_elem.congestion_ctrl_mode &&
         peer->meshconf_elem.sync_method == local_prof.meshconf_elem.sync_method &&
         peer->meshconf_elem.auth_protocol == local_prof.meshconf_elem.auth_protocol )) {
-        plc_err("mesh do not match!!");
+        plc_err("mesh do not match!!\n");
         return false;
     }
 
@@ -592,6 +602,7 @@ static inline void ak60211_mesh_plink_timer_set(struct ak60211_sta_info *sta, u3
 
 static void ak60211_mesh_plink_open(struct ak60211_sta_info *sta, struct plc_packet_union *buff)
 {
+    PLC_TRACE();
     sta->llid = ak60211_mesh_get_new_llid(sta->local);
     if (sta->plink_state != AK60211_PLINK_LISTEN) {
         return;
@@ -608,9 +619,11 @@ static void ak60211_mesh_plink_open(struct ak60211_sta_info *sta, struct plc_pac
 void ak60211_mesh_neighbour_update(struct ak60211_if_data *ifmsh, struct plc_packet_union *buff)
 {
     struct ak60211_sta_info *sta;
+
     sta = mesh_sta_info_get(ifmsh, buff->plchdr.machdr.h_addr4);
 
     if(!sta) {
+        plc_err("mesh sta info get fail\n");
         goto out;
     }
     if (sta->plink_state == AK60211_PLINK_LISTEN) {
@@ -642,12 +655,12 @@ static enum ak60211_plink_event ak60211_plink_get_event(struct ak60211_if_data *
 
     if (!sta) {
         if (ftype != WLAN_SP_MESH_PEERING_OPEN) {
-            plc_err("Mesh plink: cls or cnf from unknown peer");
+            plc_err("Mesh plink: cls or cnf from unknown peer\n");
             goto out;
         }
 
        if (!ak60211_mplink_free_count(ifmsh)) {
-           plc_err("Mesh plink: no more free plinks");
+           plc_err("Mesh plink: no more free plinks\n");
            goto out;
        }
 
@@ -707,7 +720,7 @@ static void ak60211_mesh_plink_fsm(enum ak60211_plink_event event, struct ak6021
     enum ieee80211_self_protected_actioncode action = 0;
 
     PLC_TRACE();
-    plc_info("peer %pM in state %s got events %s", sta->addr, mplstates[sta->plink_state], mplevents[event]);
+    plc_info("peer %pM in state %s got events %s\n", sta->addr, mplstates[sta->plink_state], mplevents[event]);
 
     switch(sta->plink_state) {
         case AK60211_PLINK_LISTEN:
@@ -828,7 +841,7 @@ void ak60211_mesh_rx_plink_frame(struct ak60211_if_data *ifmsh, struct plc_packe
 
     ftype = buff->un.self.action;
     if (is_multicast_ether_addr(buff->da)) {
-        plc_err("Mesh plink: ignore frame from multicast");
+        plc_err("Mesh plink: ignore frame from multicast\n");
         return;
     }
 

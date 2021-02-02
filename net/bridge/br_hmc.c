@@ -316,14 +316,25 @@ int br_hmc_path_update(struct net_bridge_hmc *hmc)
 		return -1;
 
 	path = br_hmc_path_lookup(h->path->dst);
-	if (CHECK_MEM(path))
-		return -1;
+	if (CHECK_MEM(path)) {
+		br_hmc_info("Not found this path and add it to the table\n");
+		path = br_hmc_path_add(h->path->dst);
+		if (IS_ERR(path)) {
+            br_hmc_err("Failed to allocate mem\n");
+			return -ENOMEM;
+		}
+	}
 
 	path->sn = h->path->sn;
 	path->metric = h->path->metric;
 	path->flags = h->path->flags;
 
 	br_hmc_info("update BR-HMC table, path->flags = %d\n", path->flags);
+
+    if (!(path->flags & BR_HMC_PATH_RESOLVED))
+        return -1;
+
+    br_hmc_info("path is resolved, send tx queue\n");
 
 	br_hmc_path_tx_pending(path, h);
 

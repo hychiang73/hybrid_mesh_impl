@@ -90,7 +90,7 @@ static void sbeacon_wq_deinit(void)
 
     cancel_delayed_work_sync(&sbeacon_work);
 	flush_workqueue(sbeacon_wq);
-    plc_info("sbeacon send cancel");
+    plc_info("sbeacon send cancel\n");
 }
 
 static void sbeacon_wq_init(void)
@@ -155,9 +155,9 @@ static ssize_t plc_proc_test_write(struct file *pfile, const char *ubuf, size_t 
     if (!memcmp(buf, "debug", size-1)) {
         plc_dbg = !plc_dbg;
         if (plc_dbg) {
-            pr_info("PLC: (%s, %d): plc_dbg on", __func__, __LINE__);
+            pr_info("PLC: (%s, %d): plc_dbg on\n", __func__, __LINE__);
         } else {
-            pr_info("PLC: (%s, %d): plc_dbg off", __func__, __LINE__);
+            pr_info("PLC: (%s, %d): plc_dbg off\n", __func__, __LINE__);
         }
     }
     return size;
@@ -172,7 +172,7 @@ static void plc_proc_init(void)
     proc_dir_plc = proc_mkdir("hmc_plc", NULL);
     node = proc_create("plc", 0666, proc_dir_plc, &proc_plc_fops);
     if (!node) {
-        plc_err("Failed to create proc node");
+        plc_err("Failed to create proc node\n");
         return;
     }
 }

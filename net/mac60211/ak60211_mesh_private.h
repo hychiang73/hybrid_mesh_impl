@@ -44,9 +44,14 @@
 #include "mac60211.h"
 
 
-#define plc_info(fmt, arg...)           						            \
+#define plc_debug(fmt, arg...)                                              \
 ({				            					                            \
    if(plc_dbg) pr_info("PLC: (%s, %d): " fmt, __func__, __LINE__, ##arg);	\
+})									                                        \
+
+#define plc_info(fmt, arg...)           						            \
+({				            					                            \
+   pr_info("PLC: (%s, %d): " fmt, __func__, __LINE__, ##arg);	\
 })									                                        \
 
 #define plc_err(fmt, arg...)						            \
@@ -54,7 +59,7 @@
 	pr_err("PLC: (%s, %d): " fmt, __func__, __LINE__, ##arg);	\
 })									                            \
 
-#define PLC_TRACE()     plc_info("%s\n", __func__);
+#define PLC_TRACE()     plc_debug("%s\n", __func__);
 
 #ifndef __packed
 #define __packed __attribute__((packed))
