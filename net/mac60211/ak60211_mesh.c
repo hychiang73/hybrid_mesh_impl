@@ -318,7 +318,7 @@ int ak60211_mpath_sel_frame_tx(enum ak60211_mpath_frame_type action, u8 flags, c
     pos = (u8 *)&plcpkts->un.preq.elem.tag;
     switch(action) {
         case AK60211_MPATH_PREQ:
-            plc_info("seding PREQ to %pM\n", target);
+            plc_info("sending PREQ to %pM\n", target);
             *pos++ = WLAN_EID_PREQ;
             ie_len = 37;
             break;
@@ -508,7 +508,7 @@ static void plc_gen_sbeacon(struct plc_packet_union *buff)
     meshid[7] = 't';
     
     buff->plchdr.framectl = 0x0080;
-    buff->plchdr.duration_id = 0;
+    buff->plchdr.duration_id = 0x0000;
 
     buff->plchdr.machdr.h_addr1[0] = 0xff;
     buff->plchdr.machdr.h_addr1[1] = 0xff;
@@ -596,6 +596,7 @@ void plc_send_beacon(void)
     skb_reserve(nskb, 2);
 
     pos = skb_put_zero(nskb, beacon_len);
+
     plc_fill_ethhdr((u8 *)&sbeacon, broadcast_addr, plc->br_addr, ntohs(0xAA55));
 
     memcpy(sbeacon.plchdr.machdr.h_addr2, plc->br_addr, ETH_ALEN);
@@ -604,6 +605,8 @@ void plc_send_beacon(void)
     memcpy(pos, &sbeacon, beacon_len);
 
     skb_reset_mac_header(nskb);
+    /* not sure network header - add cause "protocol xxxx is buggy, dev eth0"*/
+    skb_set_network_header(nskb, sizeof(struct ethhdr));
 
     ak60211_pkt_hex_dump(nskb, "plc_beacon_send", 0);
 

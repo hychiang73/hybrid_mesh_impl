@@ -159,7 +159,6 @@ struct ak60211_sta_info* mesh_sta_info_get(struct ak60211_if_data *ifmsh, u8 *ad
     if (sta) {
         ak60211_mesh_sta_init(sta);
     } else {
-        plc_info("sta is not exist, alloc new sta\n");
         sta = ak60211_mesh_sta_alloc(ifmsh, addr);
 
         if (!sta) {

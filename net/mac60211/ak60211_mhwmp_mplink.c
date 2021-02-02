@@ -137,7 +137,7 @@ static u32 ak60211_hwmp_route_info_get(struct ak60211_if_data *ifmsh, struct plc
     struct ak60211_sta_info *sta;
     struct ak60211_mesh_path *mpath;
     bool fresh_info;
-    const u8 *orig_addr;
+    const u8 *orig_addr, *ta;
     u32 orig_sn, orig_metric;
     unsigned long orig_lifetime, exp_time;
     u32 last_hop_metric, new_metric;
@@ -234,8 +234,53 @@ static u32 ak60211_hwmp_route_info_get(struct ak60211_if_data *ifmsh, struct plc
         }
     }
 
+    /* Update and check transmitter routing info */
+    ta = buff->plchdr.machdr.h_addr2;
+    if (ether_addr_equal(orig_addr, ta)) {
+        fresh_info = false;
+    } else {
+        fresh_info = true;
+
+        mpath = ak60211_mpath_lookup(ifmsh, ta);
+        if (mpath) {
+            spin_lock_bh(&mpath->state_lock);
+            if ((mpath->flags & PLC_MESH_PATH_FIXED) ||
+                    ((mpath->flags & PLC_MESH_PATH_ACTIVE) &&
+                     ((rcu_access_pointer(mpath->next_hop) != sta ?
+                       mult_frac(last_hop_metric, 10, 9) : last_hop_metric) > mpath->metric))) {
+                fresh_info = false;
+            }
+        } else {
+            mpath = ak60211_mpath_add(ifmsh, ta);
+            if (IS_ERR(mpath)) {
+                rcu_read_unlock();
+                return 0;
+            }
+            spin_lock_bh(&mpath->state_lock);
+        }
+    }
+
+    if (fresh_info) {
+        rcu_assign_pointer(mpath->next_hop, sta);
+        mpath->flags |= PLC_MESH_PATH_SN_VALID;
+        mpath->metric = last_hop_metric;
+        mpath->exp_time = time_after(mpath->exp_time, exp_time) ?
+                            mpath->exp_time : exp_time;
+        mpath->hop_count = 1;
+        mpath->flags |= PLC_MESH_PATH_ACTIVE | PLC_MESH_PATH_RESOLVED;
+        spin_unlock_bh(&mpath->state_lock);
+        /* todo: ewma_mesh_fail_avg */
+
+        /* information for BR-HMC */
+        memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
+        plc->path->flags = mpath->flags;
+        plc->path->sn = mpath->sn;
+        plc->path->metric = mpath->metric;
+        plc_debug("flags:0x%x, sn:0x%x, metric:0x%x\n", plc->path->flags, plc->path->sn, plc->path->metric);
+        br_hmc_path_update(plc);
+    }
+
     rcu_read_unlock();
-    /* todo: Update and check transmitter routing info */
     return process? new_metric : 0;
 }
 
