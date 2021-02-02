@@ -161,6 +161,7 @@ struct hmc_path *br_hmc_path_lookup(const u8 *dst)
 
 	return path;
 }
+EXPORT_SYMBOL(br_hmc_path_lookup);
 
 struct net_bridge_hmc *br_hmc_iface_id_lookup(u8 id)
 {
@@ -213,6 +214,7 @@ int br_hmc_path_del(const u8 *addr)
 
 	return 0;
 }
+EXPORT_SYMBOL(br_hmc_path_del);
 
 static struct hmc_path *br_hmc_path_new(const u8 *dst, gfp_t gfp_flags)
 {
@@ -273,6 +275,7 @@ struct hmc_path *br_hmc_path_add(const u8 *dst)
 
 	return new_path;
 }
+EXPORT_SYMBOL(br_hmc_path_add);
 
 int br_hmc_path_lookup_by_idx(struct nl60211_mesh_info *info, int idx)
 {
@@ -299,6 +302,7 @@ int br_hmc_path_lookup_by_idx(struct nl60211_mesh_info *info, int idx)
 
 	return 0;
 }
+EXPORT_SYMBOL(br_hmc_path_lookup_by_idx);
 
 int br_hmc_path_update(struct net_bridge_hmc *hmc)
 {

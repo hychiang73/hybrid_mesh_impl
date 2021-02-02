@@ -1,6 +1,5 @@
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <linux/netlink.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -9,6 +8,36 @@
 #include <stdbool.h>
 #include <net/if.h> // for if_nametoindex()
 #include <errno.h> // for perror()
+#include <linux/errno.h>
+#include <linux/if_ether.h>
+#include <linux/types.h>
+#include <linux/netlink.h>
+
+#ifndef u8
+typedef uint8_t u8;
+#endif
+#ifndef u16
+typedef uint16_t u16;
+#endif
+#ifndef u32
+typedef uint32_t u32;
+#endif
+#ifndef u64
+typedef uint64_t u64;
+#endif
+
+#ifndef s8
+typedef int8_t s8;
+#endif
+#ifndef s16
+typedef int16_t s16;
+#endif
+#ifndef s32
+typedef int32_t s32;
+#endif
+#ifndef s64
+typedef int64_t s64;
+#endif
 
 #define STR_DEBUG           "debug"
 #define STR_GETMESHID       "getmeshid"
@@ -21,6 +50,11 @@
 #define STR_FLOODSEND       "sendflood"
 #define STR_BESTSEND        "sendbest"
 #define STR_GETSA           "getsa"
+#define STR_ADDMPATH        "addmpath"
+#define STR_DELMPATH        "delmpath"
+#define STR_SETMPATH        "setmpath"
+#define STR_GETMPATH        "getmpath"
+#define STR_DUMPMPATH       "dumpmpath"
 //
 //ref: netlink.h
 //
@@ -40,122 +74,176 @@ enum {
 	NL60211_SEND_FLOOD,    // snap sendflood   br0 ff ff ff ff ff ff 11...
 	NL60211_SEND_BEST,     // snap sendbest    br0 ff ff ff ff ff ff 11...
 	NL60211_GETSA,         // snap getsa       br0
+
+	NL60211_ADD_MPATH,
+	NL60211_DEL_MPATH,
+	NL60211_SET_MPATH,
+	NL60211_GET_MPATH,
+	NL60211_DUMP_MPATH,
 };
 
 // inside nl60211msg.buf
 // response
 struct nl60211_debug_res {
-	int32_t     return_code;
-	uint32_t    len;
-	char        buf[];
+	s32    return_code;
+	u32    len;
+	char   buf[];
 };
 
 struct nl60211_getmeshid_res {
-	int32_t     return_code;
-	uint32_t    id_len;
-	char        id[];
+	s32    return_code;
+	u32    id_len;
+	char   id[];
 };
 
 struct nl60211_setmeshid_res {
-	int32_t     return_code;
+	s32    return_code;
 };
 
 struct nl60211_recv_res {
-	int32_t     return_code;
-	uint32_t    recv_len;
-	uint8_t     recv_buf[];
+	s32    return_code;
+	u32    recv_len;
+	u8     recv_buf[];
 };
 
 struct nl60211_recvonce_res {
-	int32_t     return_code;
-	uint32_t    recv_len;
-	uint8_t     recv_buf[];
+	s32    return_code;
+	u32    recv_len;
+	u8     recv_buf[];
 };
 
 struct nl60211_recvcancel_res {
-	int32_t     return_code;
+	s32    return_code;
 };
 
 struct nl60211_sendplc_res {
-	int32_t     return_code;
+	s32    return_code;
 };
 
 struct nl60211_sendwifi_res {
-	int32_t     return_code;
+	s32    return_code;
 };
 
 struct nl60211_sendflood_res {
-	int32_t     return_code;
+	s32    return_code;
 };
 
 struct nl60211_sendbest_res {
-	int32_t     return_code;
+	s32    return_code;
 };
 
 struct nl60211_getsa_res {
-	int32_t     return_code;
-	uint32_t    sa_len;
-	uint8_t     sa[];
+	s32    return_code;
+	u32    sa_len;
+	u8     sa[];
+};
+
+struct nl60211_addmpath_res {
+	s32    return_code;
+};
+
+struct nl60211_delmpath_res {
+	s32    return_code;
+};
+
+struct nl60211_setmpath_res {
+	s32    return_code;
+};
+
+struct nl60211_getmpath_res {
+	s32    return_code;
+	u8     da[ETH_ALEN];
+	u32    sn;
+	u32    metric;
+	u32    flags;
+	u32    egress;
+};
+
+struct nl60211_dumpmpath_res {
+	s32    return_code;
+	u8     da[ETH_ALEN];
+	u32    sn;
+	u32    metric;
+	u32    flags;
+	u32    egress;
 };
 
 // request
 struct nl60211_debug_req {
-	uint32_t    len;
-	uint8_t     buf[];
+	u32    len;
+	u8     buf[];
 };
 
 struct nl60211_getmeshid_req {
 };
 
 struct nl60211_setmeshid_req {
-	uint32_t    id_len;
-	char        id[];
+	u32    id_len;
+	char   id[];
 };
 
 struct nl60211_recv_req {
-	uint8_t     ether_type[2];
+	u8     ether_type[2];
 };
 
 struct nl60211_recvonce_req {
-	uint8_t     ether_type[2];
+	u8     ether_type[2];
 };
 
 struct nl60211_recvcancel_req {
 };
 
 struct nl60211_sendplc_req {
-	uint32_t    total_len;
-	uint8_t     da[6];
-	uint8_t     sa[6];
-	uint8_t     ether_type[2];
-	uint8_t     payload[];
+	u32    total_len;
+	u8     da[6];
+	u8     sa[6];
+	u8     ether_type[2];
+	u8     payload[];
 };
 
 struct nl60211_sendwifi_req {
-	uint32_t    total_len;
-	uint8_t     da[6];
-	uint8_t     sa[6];
-	uint8_t     ether_type[2];
-	uint8_t     payload[];
+	u32    total_len;
+	u8     da[6];
+	u8     sa[6];
+	u8     ether_type[2];
+	u8     payload[];
 };
 
 struct nl60211_sendflood_req {
-	uint32_t    total_len;
-	uint8_t     da[6];
-	uint8_t     sa[6];
-	uint8_t     ether_type[2];
-	uint8_t     payload[];
+	u32    total_len;
+	u8     da[6];
+	u8     sa[6];
+	u8     ether_type[2];
+	u8     payload[];
 };
 
 struct nl60211_sendbest_req {
-	uint32_t    total_len;
-	uint8_t     da[6];
-	uint8_t     sa[6];
-	uint8_t     ether_type[2];
-	uint8_t     payload[];
+	u32    total_len;
+	u8     da[6];
+	u8     sa[6];
+	u8     ether_type[2];
+	u8     payload[];
 };
 
 struct nl60211_getsa_req {
+};
+
+struct nl60211_addmpath_req {
+	u8     da[ETH_ALEN];
+};
+
+struct nl60211_delmpath_req {
+	u8     da[ETH_ALEN];
+};
+
+struct nl60211_setmpath_req {
+};
+
+struct nl60211_getmpath_req {
+	u8     da[ETH_ALEN];
+};
+
+struct nl60211_dumpmpath_req {
 };
 
 #define MAX_PAYLOAD 2048 /* maximum payload size for request&response */
@@ -694,6 +782,172 @@ int do_getsa(int argc, char **argv)
 	return 0;
 }
 
+int do_addmpath(int argc, char **argv)
+{
+	unsigned int if_idx = nametoindex(argv[0]);
+	//request
+	struct nl60211_addmpath_req *req =
+		(struct nl60211_addmpath_req *)sk_msg.nl_msg.buf;
+	//response
+	struct nl60211msg *nlres;
+	struct nl60211_addmpath_res *res;
+	int i, temp;
+
+	printf("argc = %d, if_idx = %d\n", argc, if_idx);
+	argc--;
+	argv++;
+	if (argc != ETH_ALEN)
+		printf("Error: Must input %d bytes da!", ETH_ALEN);
+
+	req = (struct nl60211_addmpath_req *)sk_msg.nl_msg.buf;
+	for (i = 0; i < ETH_ALEN; i++) {
+		if (sscanf(argv[i], "%x", &temp) == 0) {
+			printf("Error: not a hex string!\n");
+			exit(-1);
+		}
+		req->da[i] = (uint8_t)temp;
+	}
+
+	if_nl_send(
+		NL60211_ADD_MPATH,
+		if_idx,
+		sizeof(struct nl60211_addmpath_req));
+
+	if_nl_recv();
+	nlres = (struct nl60211msg *)&sk_msg.nl_msg;
+	res = (struct nl60211_addmpath_res *)nlres->buf;
+	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
+	printf("if_index    = %d\n", nlres->if_index);
+	printf("return_code = %d\n", res->return_code);
+	return 0;
+}
+
+int do_delmpath(int argc, char **argv)
+{
+	unsigned int if_idx = nametoindex(argv[0]);
+	//request
+	struct nl60211_delmpath_req *req =
+		(struct nl60211_delmpath_req *)sk_msg.nl_msg.buf;
+	//response
+	struct nl60211msg *nlres;
+	struct nl60211_delmpath_res *res;
+	int i, temp;
+
+	printf("argc = %d, if_idx = %d\n", argc, if_idx);
+	argc--;
+	argv++;
+	if (argc != ETH_ALEN)
+		printf("Error: Must input %d bytes da!", ETH_ALEN);
+
+	req = (struct nl60211_delmpath_req *)sk_msg.nl_msg.buf;
+	for (i = 0; i < ETH_ALEN; i++) {
+		if (sscanf(argv[i], "%x", &temp) == 0) {
+			printf("Error: not a hex string!\n");
+			exit(-1);
+		}
+		req->da[i] = (uint8_t)temp;
+	}
+
+	if_nl_send(
+		NL60211_DEL_MPATH,
+		if_idx,
+		sizeof(struct nl60211_delmpath_req));
+
+	if_nl_recv();
+	nlres = (struct nl60211msg *)&sk_msg.nl_msg;
+	res = (struct nl60211_delmpath_res *)nlres->buf;
+	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
+	printf("if_index    = %d\n", nlres->if_index);
+	printf("return_code = %d\n", res->return_code);
+	return 0;
+}
+
+int do_setmpath(int argc, char **argv)
+{
+	return 0;
+}
+
+int do_getmpath(int argc, char **argv)
+{
+	unsigned int if_idx = nametoindex(argv[0]);
+	//request
+	struct nl60211_getmpath_req *req =
+		(struct nl60211_getmpath_req *)sk_msg.nl_msg.buf;
+	//response
+	struct nl60211msg *nlres;
+	struct nl60211_getmpath_res *res;
+	int i, temp;
+
+	printf("argc = %d, if_idx = %d\n", argc, if_idx);
+	argc--;
+	argv++;
+	if (argc != ETH_ALEN)
+		printf("Error: Must input %d bytes da!", ETH_ALEN);
+
+	req = (struct nl60211_getmpath_req *)sk_msg.nl_msg.buf;
+	for (i = 0; i < ETH_ALEN; i++) {
+		if (sscanf(argv[i], "%x", &temp) == 0) {
+			printf("Error: not a hex string!\n");
+			exit(-1);
+		}
+		req->da[i] = (uint8_t)temp;
+	}
+
+	if_nl_send(
+		NL60211_GET_MPATH,
+		if_idx,
+		sizeof(struct nl60211_getmpath_req));
+
+	if_nl_recv();
+	nlres = (struct nl60211msg *)&sk_msg.nl_msg;
+	res = (struct nl60211_getmpath_res *)nlres->buf;
+	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
+	printf("if_index    = %d\n", nlres->if_index);
+	printf("return_code = %d\n", res->return_code);
+	if (res->return_code == 0) {
+		printf("%-21s %-10s %-10s %-10s %-10s\n",
+		       "DA", "SN", "METRIC", "FLAG", "EGRESS");
+		printf("%02X:%02X:%02X:%02X:%02X:%02X     ",
+		       res->da[0], res->da[1], res->da[2],
+		       res->da[3], res->da[4], res->da[5]);
+		printf("%-10d %-10d %-10d %-10d\n",
+		       res->sn, res->metric, res->flags, res->egress);
+	}
+	return 0;
+}
+
+int do_dumpmpath(int argc, char **argv)
+{
+	unsigned int if_idx = nametoindex(argv[0]);
+	//request
+
+	//response
+	struct nl60211msg *nlres;
+	struct nl60211_getmpath_res *res;
+	int i, temp;
+
+	if_nl_send(NL60211_DUMP_MPATH, if_idx, 0);
+	printf("%-21s %-10s %-10s %-10s %-10s\n",
+	       "DA", "SN", "METRIC", "FLAG", "EGRESS");
+
+	while (1) {
+		if_nl_recv();
+		nlres = (struct nl60211msg *)&sk_msg.nl_msg;
+		res = (struct nl60211_getmpath_res *)nlres->buf;
+		if (res->return_code < 0)
+			break;
+		//printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
+		//printf("if_index    = %d\n", nlres->if_index);
+		//printf("return_code = %d\n", res->return_code);
+		printf("%02X:%02X:%02X:%02X:%02X:%02X     ",
+		       res->da[0], res->da[1], res->da[2],
+		       res->da[3], res->da[4], res->da[5]);
+		printf("%-10d %-10d %-10d %-10d\n",
+		       res->sn, res->metric, res->flags, res->egress);
+	}
+	return 0;
+}
+
 static const struct cmd {
 	const char *cmd;
 	int (*func)(int argc, char **argv);
@@ -709,6 +963,11 @@ static const struct cmd {
 	{ STR_FLOODSEND,    do_sendflood },
 	{ STR_BESTSEND,     do_sendbest },
 	{ STR_GETSA,        do_getsa },
+	{ STR_ADDMPATH,     do_addmpath },
+	{ STR_DELMPATH,     do_delmpath },
+	{ STR_SETMPATH,     do_setmpath },
+	{ STR_GETMPATH,     do_getmpath },
+	{ STR_DUMPMPATH,    do_dumpmpath },
 	{ 0 }
 };
 

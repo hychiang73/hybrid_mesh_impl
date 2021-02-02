@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/*
- * Copyright (C) 2021 AkiraNET Corporation
- */
+/*Copyright (C) 2021 AkiraNET Corporation */
 
 #ifndef NL60211_H
 #define NL60211_H
@@ -46,12 +44,7 @@
 
 #include "../bridge/br_private.h"
 
-#define TRACE()     hmc_info("%s\n", __func__);
-#ifndef __packed
-#define __packed __attribute__((packed))
-#endif 
-
-extern int nl60211_netlink_init(void);
-extern void nl60211_netlink_exit(void);
+int nl60211_netlink_init(void);
+void nl60211_netlink_exit(void);
 
 #endif /* NL60211_H */
