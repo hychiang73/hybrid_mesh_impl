@@ -89,10 +89,9 @@ static void br_hmc_path_tx_queue(struct hmc_path *path, struct net_bridge_hmc *p
 	if (!plc->ops->queue_preq)
 		return;
 
-	if (!(path->flags & BR_HMC_PATH_RESOLVING)) {
-		br_hmc_info("notify mesh mgmt to send PREQ for resolving\n");
+	if (!(path->flags & BR_HMC_PATH_RESOLVING))
 		plc->ops->queue_preq(plc);
-	}
+
 }
 
 /* Sends pending frames in a mesh path queue */
@@ -317,7 +316,6 @@ int br_hmc_path_update(struct net_bridge_hmc *hmc)
 
 	path = br_hmc_path_lookup(h->path->dst);
 	if (CHECK_MEM(path)) {
-		br_hmc_info("Not found this path and add it to the table\n");
 		path = br_hmc_path_add(h->path->dst);
 		if (IS_ERR(path)) {
 			br_hmc_err("Failed to allocate mem\n");
@@ -367,7 +365,6 @@ int br_hmc_path_resolve(struct sk_buff *skb)
 	/* no dest found, start resolving */
 	path = br_hmc_path_lookup(dest);
 	if (!path) {
-		br_hmc_info("Not found this path and add it to the table\n");
 		path = br_hmc_path_add(dest);
 		if (IS_ERR(path)) {
 			br_hmc_path_discard_frame(skb);
@@ -418,7 +415,7 @@ int br_hmc_forward(struct sk_buff *skb, struct net_bridge_hmc *hmc)
 		if (egress == HMC_PORT_FLOOD ||
 			(egress == HMC_PORT_PLC && (strncmp(p->dev->name, "eth0", strlen("eth0")) == 0)) ||
 			(egress == HMC_PORT_WIFI &&(strncmp(p->dev->name, "mesh0", strlen("mesh0")) == 0))) {
-			br_hmc_info("forward to %s\n", p->dev->name);
+			br_hmc_dbg("forward to %s\n", p->dev->name);
 			br_hmc_print_skb(skb, "br_hmc_forward", 0);
 			skb->dev = p->dev;
 			dev_queue_xmit(skb);
@@ -500,7 +497,6 @@ void br_hmc_dealloc(void)
 
 	mutex_lock(&hmc_mutex);
 	list_for_each_entry_safe(p, n, &br_hmc.list, list) {
-		br_hmc_info("remove hmc id %d", p->id);
 		list_del(&p->list);
 		kfree(p);
 	}
