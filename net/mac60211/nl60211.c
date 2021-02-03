@@ -223,7 +223,7 @@ void test_hmc_gen_pkt_snap(
 {
 #if IN_JETSON
 	unsigned int i = 0;
-	unsigned int proto = 0xAA55;
+	unsigned int proto = 0xAA66;
 	struct sk_buff *new_sk;
 	struct ethhdr *ether;
 	//const u8 da[ETH_ALEN] = {0x00,0x04,0x4b,0xe6,0xec,0x3d};
@@ -952,34 +952,36 @@ int nl60211_rx_callback(struct sk_buff *skb)
 
 	return 0;
 }
+EXPORT_SYMBOL(nl60211_rx_callback);
 
 static void nl60211_netlink_input(struct sk_buff *skb_in)
 {
 	struct nl60211msg *nlreq;
 	struct nlmsghdr *nlh;
 
-	pr_info("\nEntering: %s\n", __func__);
-
 	// parsing request
 	nlh = (struct nlmsghdr *)skb_in->data;
 	nlreq = (struct nl60211msg *)skb_in->data;
 
-	//pr_info("Netlink received msg payload:%s\n", (char*)nlmsg_data(nlh));
-	pr_info("skb_in: len=%d, data_len=%d, mac_len=%d\n", skb_in->len,
-		skb_in->data_len, skb_in->mac_len);
-	pr_info("skb_in          = %p\n", skb_in);
-	pr_info("skb_in->data    = %p\n", skb_in->data);
-	pr_info("nlh             = %p\n", nlh);
-	pr_info("nlmsg_data(nlh) = %p\n", nlmsg_data(nlh));
-	pr_info("nlh->nlmsg_len   = %d\n", nlh->nlmsg_len);
-	pr_info("nlh->nlmsg_type  = %d\n", nlh->nlmsg_type);
-	pr_info("nlh->nlmsg_flags = %d\n", nlh->nlmsg_flags);
-	pr_info("nlh->nlmsg_seq   = %d\n", nlh->nlmsg_seq);
-	pr_info("nlh->nlmsg_pid   = %d\n", nlh->nlmsg_pid);
-	//pr_info("user_data[0]     = %d\n", snap_req->buf[0]);
-	//pr_info("user_data[1]     = %d\n", snap_req->buf[1]);
-	//pr_info("user_data[2]     = %d\n", snap_req->buf[2]);
-	pr_info("if_index     = %d\n", nlreq->if_index);
+	pr_info("\nEntering: %s\n", __func__);
+	if (pr_debug_en) {
+		//pr_info("Netlink received msg payload:%s\n", (char*)nlmsg_data(nlh));
+		pr_info("skb_in: len=%d, data_len=%d, mac_len=%d\n", skb_in->len,
+			skb_in->data_len, skb_in->mac_len);
+		pr_info("skb_in          = %p\n", skb_in);
+		pr_info("skb_in->data    = %p\n", skb_in->data);
+		pr_info("nlh             = %p\n", nlh);
+		pr_info("nlmsg_data(nlh) = %p\n", nlmsg_data(nlh));
+		pr_info("nlh->nlmsg_len   = %d\n", nlh->nlmsg_len);
+		pr_info("nlh->nlmsg_type  = %d\n", nlh->nlmsg_type);
+		pr_info("nlh->nlmsg_flags = %d\n", nlh->nlmsg_flags);
+		pr_info("nlh->nlmsg_seq   = %d\n", nlh->nlmsg_seq);
+		pr_info("nlh->nlmsg_pid   = %d\n", nlh->nlmsg_pid);
+		//pr_info("user_data[0]     = %d\n", snap_req->buf[0]);
+		//pr_info("user_data[1]     = %d\n", snap_req->buf[1]);
+		//pr_info("user_data[2]     = %d\n", snap_req->buf[2]);
+		pr_info("if_index     = %d\n", nlreq->if_index);
+	}
 
 	pid_of_sender = nlreq->nl_msghdr.nlmsg_pid;
 	if_index = nlreq->if_index;
@@ -1042,7 +1044,7 @@ struct netlink_kernel_cfg nl60211_netlink_cfg = {
 	.input = nl60211_netlink_input,
 };
 
-static int test_br_hmc_rx_snap(struct sk_buff *skb)
+int test_br_hmc_rx_snap(struct sk_buff *skb)
 {
 	//br_hmc_print_skb(skb, "test_br_hmc_rx_snap", 0);
 	nl60211_rx_callback(skb);

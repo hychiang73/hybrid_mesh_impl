@@ -44,6 +44,8 @@
 
 #include "../bridge/br_private.h"
 
+int nl60211_rx_callback(struct sk_buff *skb);
+
 int nl60211_netlink_init(void);
 void nl60211_netlink_exit(void);
 
