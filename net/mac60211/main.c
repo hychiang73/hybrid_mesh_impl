@@ -104,7 +104,7 @@ static void sbeacon_wq_init(void)
 	WARN_ON(!sbeacon_wq);
 
 	INIT_DELAYED_WORK(&sbeacon_work, plc_sbeacon_wq);
-	plc_send_beacon();
+	//plc_send_beacon();
 
 	if (!queue_delayed_work(sbeacon_wq, &sbeacon_work,
 				msecs_to_jiffies(SBEACON_DELAY)))
@@ -140,7 +140,7 @@ static ssize_t plc_proc_test_write(struct file *pfile, const char *ubuf,
 	// beacon start
 	if (!memcmp(buf, "beacon", size - 1)) {
 		sbeacon_flag = !sbeacon_flag;
-		if (sbeacon_flag)
+		if (!sbeacon_flag)
 			sbeacon_wq_init();
 		else
 			sbeacon_wq_deinit();
@@ -210,6 +210,8 @@ static int __init plc_init(void)
 	plc_proc_init();
 
 	ifmesh = ak60211_mesh_init("AkiraNet", plc->br_addr);
+	sbeacon_wq_init();
+
 	if (!ifmesh)
 		plc_err("mesh interface %pM init fail\n", plc->br_addr);
 	else
