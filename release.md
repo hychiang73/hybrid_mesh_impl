@@ -3,6 +3,8 @@
   * Add plc mesh forwarding feature
   * Fix plc mesh preq and prep functions
   * Add the command to get mesh table
+  * PLC Mesh beacon will be sent peridoically when modules is loaded.
+  * Add PLC mesh peering open retry and close mechnism.
 ---
 * v0.1
   * Created hybrid mesh in bridge
