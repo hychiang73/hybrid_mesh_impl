@@ -15,28 +15,6 @@
 
 #define MAX_SANE_SN_DELTA 32
 
-static const char * const mplstates[] = {
-	[AK60211_PLINK_LISTEN] = "LISTEN",
-	[AK60211_PLINK_OPN_SNT] = "OPN-SNT",
-	[AK60211_PLINK_OPN_RCVD] = "OPN-RCVD",
-	[AK60211_PLINK_CNF_RCVD] = "CNF_RCVD",
-	[AK60211_PLINK_ESTAB] = "ESTAB",
-	[AK60211_PLINK_HOLDING] = "HOLDING",
-	[AK60211_PLINK_BLOCKED] = "BLOCKED"
-};
-
-static const char * const mplevents[] = {
-	[PLINK_UNDEFINED] = "NONE",
-	[OPN_ACPT] = "OPN_ACPT",
-	[OPN_RJCT] = "OPN_RJCT",
-	[OPN_IGNR] = "OPN_IGNR",
-	[CNF_ACPT] = "CNF_ACPT",
-	[CNF_RJCT] = "CNF_RJCT",
-	[CNF_IGNR] = "CNF_IGNR",
-	[CLS_ACPT] = "CLS_ACPT",
-	[CLS_IGNR] = "CLS_IGNR"
-};
-
 static inline u32 ak60211_mplink_free_count(struct ak60211_if_data *ifmsh)
 {
 	return ifmsh->mshcfg.MeshMaxPeerLinks - atomic_read(&ifmsh->estab_plinks);
@@ -627,15 +605,6 @@ static u16 ak60211_mesh_get_new_llid(struct ak60211_if_data *local)
 	return llid;
 }
 
-static inline void ak60211_mesh_plink_fsm_restart(struct ak60211_sta_info *sta)
-{
-	sta->plink_state = AK60211_PLINK_LISTEN;
-	sta->reason = 0;
-	sta->plid = 0;
-	sta->llid = 0;
-	/* sta->llid = sta->plid = sta->reason = 0; */
-}
-
 static void ak60211_mesh_plink_close(struct ak60211_sta_info *sta,
 				     enum ak60211_plink_event event)
 {
@@ -644,10 +613,13 @@ static void ak60211_mesh_plink_close(struct ak60211_sta_info *sta,
 
 	sta->plink_state = AK60211_PLINK_HOLDING;
 	sta->reason = reason;
+
+	mod_timer(&sta->plink_timer, sta->local->mshcfg.MeshHoldingTimeout);
 }
 
 static void ak60211_mesh_plink_establish(struct ak60211_sta_info *sta)
 {
+	del_timer(&sta->plink_timer);
 	sta->plink_state = AK60211_PLINK_ESTAB;
 	plc_info("Mesh plink with %pM ESTABLISHED\n", sta->addr);
 }
@@ -681,17 +653,22 @@ static inline void ak60211_mesh_plink_timer_set(struct ak60211_sta_info *sta,
 }
 
 static void ak60211_mesh_plink_open(struct ak60211_sta_info *sta,
-				    struct plc_packet_union *buff)
+				    struct plc_packet_union *buff,
+					struct ak60211_if_data *ifmsh)
 {
 	PLC_TRACE();
+
+	spin_lock_bh(&sta->plink_lock);
 	sta->llid = ak60211_mesh_get_new_llid(sta->local);
-	if (sta->plink_state != AK60211_PLINK_LISTEN)
+	if (sta->plink_state != AK60211_PLINK_LISTEN &&
+		sta->plink_state != AK60211_PLINK_BLOCKED) {
+		spin_unlock_bh(&sta->plink_lock);
 		return;
+	}
 
 	sta->plink_state = AK60211_PLINK_OPN_SNT;
-	/* TODO: add timeout function
-	 * ak60211_mesh_plink_timer_set(sta, AK60211_MESH_RETRY_TIMEOUT);
-	 */
+	ak60211_mesh_plink_timer_set(sta, ifmsh->mshcfg.MeshRetryTimeout);
+	spin_unlock_bh(&sta->plink_lock);
 
 	plc_info("Mesh plink: start estab with %pM\n", sta->addr);
 
@@ -711,7 +688,7 @@ void ak60211_mesh_neighbour_update(struct ak60211_if_data *ifmsh,
 		goto out;
 	}
 	if (sta->plink_state == AK60211_PLINK_LISTEN)
-		ak60211_mesh_plink_open(sta, buff);
+		ak60211_mesh_plink_open(sta, buff, ifmsh);
 
 out:
 	return;
@@ -733,7 +710,8 @@ static enum ak60211_plink_event ak60211_plink_get_event(struct ak60211_if_data *
 	memcpy(&peer.meshconf_elem, &buff->un.self.meshconf_elem,
 	       sizeof(struct meshconfhdr));
 
-	matches_local = ak60211_mesh_match_local(&peer);
+	matches_local = (ftype == WLAN_SP_MESH_PEERING_CLOSE ||
+					ak60211_mesh_match_local(&peer));
 
 	if (!matches_local && !sta) {
 		event = OPN_RJCT;
@@ -820,6 +798,7 @@ static void ak60211_mesh_plink_fsm(enum ak60211_plink_event event,
 		case OPN_ACPT:
 			sta->plink_state = AK60211_PLINK_OPN_RCVD;
 			sta->llid = ak60211_mesh_get_new_llid(sta->local);
+			ak60211_mesh_plink_timer_set(sta, sta->local->mshcfg.MeshRetryTimeout);
 
 			action = AK60211_SP_MESH_PEERING_OPEN;
 			break;
@@ -841,6 +820,8 @@ static void ak60211_mesh_plink_fsm(enum ak60211_plink_event event,
 			break;
 		case CNF_ACPT:
 			sta->plink_state = AK60211_PLINK_CNF_RCVD;
+			mod_timer(&sta->plink_timer, jiffies +
+					  msecs_to_jiffies(sta->local->mshcfg.MeshConfirmTimeout));
 			break;
 		default:
 			break;
@@ -896,6 +877,7 @@ static void ak60211_mesh_plink_fsm(enum ak60211_plink_event event,
 	case AK60211_PLINK_HOLDING:
 		switch (event) {
 		case CLS_ACPT:
+			del_timer(&sta->plink_timer);
 			ak60211_mesh_plink_fsm_restart(sta);
 			break;
 		case OPN_ACPT:
@@ -913,7 +895,8 @@ static void ak60211_mesh_plink_fsm(enum ak60211_plink_event event,
 	}
 
 	if (action) {
-		ak60211_mesh_plink_frame_tx(sta->local, action, buff->plchdr.machdr.h_addr4,
+		ak60211_mesh_plink_frame_tx(sta->local, action,
+					    buff->plchdr.machdr.h_addr4,
 					    sta->llid, sta->plid);
 
 		if (action == AK60211_SP_MESH_PEERING_OPEN)

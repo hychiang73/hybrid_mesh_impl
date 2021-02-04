@@ -692,6 +692,77 @@ out:
 	ak60211_dev_unlock(ifmsh);
 }
 
+void ak60211_mplink_timer(struct timer_list *t)
+{
+	struct ak60211_sta_info *sta = from_timer(sta, t, plink_timer);
+	u16 reason = 0;
+	enum ak60211_sp_actioncode action = 0;
+	struct ak60211_if_data *local = sta->local;
+
+	PLC_TRACE();
+	spin_lock_bh(&sta->plink_lock);
+
+	if (time_before(jiffies, sta->plink_timer.expires)) {
+		plc_info("Ignoring timer for %pM in state %s (timer adjusted)\n",
+			 sta->addr, mplstates[sta->plink_state]);
+		spin_unlock_bh(&sta->plink_lock);
+		return;
+	}
+
+	if (sta->plink_state == AK60211_PLINK_LISTEN ||
+	    sta->plink_state == AK60211_PLINK_ESTAB) {
+		plc_info("Ignoring timer for %pM in state %s (timer deleted)\n",
+			 sta->addr, mplstates[sta->plink_state]);
+		spin_unlock_bh(&sta->plink_lock);
+		return;
+	}
+
+	plc_info("Mesh plink timer for %pM fired on state %s\n",
+		 sta->addr, mplstates[sta->plink_state]);
+	switch (sta->plink_state) {
+	case AK60211_PLINK_OPN_RCVD:
+	case AK60211_PLINK_OPN_SNT:
+		if (sta->plink_retries < local->mshcfg.MeshMaxRetries) {
+			u32 rand;
+
+			plc_info("Send OPEN to %pM (retry, timeout): %d %d\n",
+				 sta->addr, sta->plink_retries,
+				 sta->plink_timeout);
+			get_random_bytes(&rand, sizeof(u32));
+			sta->plink_timeout = sta->plink_timeout +
+					     rand % sta->plink_timeout;
+			++sta->plink_retries;
+			mod_timer(&sta->plink_timer, jiffies +
+				  msecs_to_jiffies(sta->plink_timeout));
+			action = WLAN_SP_MESH_PEERING_OPEN;
+			break;
+		}
+		reason = WLAN_REASON_MESH_MAX_RETRIES;
+		/* fall through */
+	case AK60211_PLINK_CNF_RCVD:
+		/* confirm timer */
+		if (!reason)
+			reason = WLAN_REASON_MESH_CONFIRM_TIMEOUT;
+		sta->plink_state = AK60211_PLINK_HOLDING;
+		mod_timer(&sta->plink_timer, jiffies +
+			  msecs_to_jiffies(local->mshcfg.MeshHoldingTimeout));
+		plc_info("Send CLOSE to %pM\n", sta->addr);
+		action = WLAN_SP_MESH_PEERING_CLOSE;
+		break;
+	case AK60211_PLINK_HOLDING:
+		/* holding timer */
+		del_timer(&sta->plink_timer);
+		ak60211_mesh_plink_fsm_restart(sta);
+		break;
+	default:
+		break;
+	}
+	spin_unlock_bh(&sta->plink_lock);
+	if (action)
+		ak60211_mesh_plink_frame_tx(local, action, sta->addr,
+					    sta->llid, sta->plid);
+}
+
 static void ak60211_mesh_path_timer(struct timer_list *t)
 {
 	struct ak60211_if_data *ifmsh = from_timer(ifmsh, t, mesh_path_timer);
@@ -706,6 +777,14 @@ static void ak60211_mesh_housekeeping_timer(struct timer_list *t)
 
 	set_bit(MESH_WORK_HOUSEKEEPING, &plcdev.wrkq_flags);
 	queue_work(ifmsh->workqueue, &ifmsh->work);
+}
+
+static inline void ak60211_mplink_timer_set(struct ak60211_sta_info *sta,
+					    u32 timeout)
+{
+	sta->plink_timeout = timeout;
+	mod_timer(&sta->plink_timer, jiffies +
+				msecs_to_jiffies(timeout));
 }
 
 static void ak60211_mesh_wrkq_start(struct ak60211_if_data *ifmsh)

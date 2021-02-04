@@ -244,10 +244,9 @@ static struct ak60211_sta_info *__ak60211_mesh_sta_alloc(struct ak60211_if_data 
 	if (!sta)
 		return NULL;
 
-	/* TODO: need to check sta plink timer
-	 * spin_lock_init(&sta->plink_lock);
-	 * timer_setup(&sta->plink_timer, ak60211_mplink_timer, 0);
-	 */
+	spin_lock_init(&sta->plink_lock);
+	timer_setup(&sta->plink_timer, ak60211_mplink_timer, 0);
+
 	memcpy(sta->addr, addr, ETH_ALEN);
 	sta->local = ifmsh;
 

@@ -155,6 +155,29 @@ enum ak60211_mesh_task_flags {
 	MESH_WORK_HOUSEKEEPING,
 };
 
+static const char * const mplstates[] = {
+	[AK60211_PLINK_LISTEN] = "LISTEN",
+	[AK60211_PLINK_OPN_SNT] = "OPN-SNT",
+	[AK60211_PLINK_OPN_RCVD] = "OPN-RCVD",
+	[AK60211_PLINK_CNF_RCVD] = "CNF_RCVD",
+	[AK60211_PLINK_ESTAB] = "ESTAB",
+	[AK60211_PLINK_HOLDING] = "HOLDING",
+	[AK60211_PLINK_BLOCKED] = "BLOCKED"
+};
+
+static const char * const mplevents[] = {
+	[PLINK_UNDEFINED] = "NONE",
+	[OPN_ACPT] = "OPN_ACPT",
+	[OPN_RJCT] = "OPN_RJCT",
+	[OPN_IGNR] = "OPN_IGNR",
+	[CNF_ACPT] = "CNF_ACPT",
+	[CNF_RJCT] = "CNF_RJCT",
+	[CNF_IGNR] = "CNF_IGNR",
+	[CLS_ACPT] = "CLS_ACPT",
+	[CLS_IGNR] = "CLS_IGNR"
+};
+
+
 struct ak60211_mesh_table {
 	struct rhashtable	rhead;
 	struct hlist_head	walk_head;
@@ -204,6 +227,7 @@ struct ak60211_sta_info {
 	enum ak60211_plink_state	plink_state;
 	/* sta peerlink spinlock */
 	spinlock_t plink_lock;
+	u8	plink_retries;
 	u32	plink_timeout;
 	u32	ewma_fail_avg;
 	u16	llid;
@@ -430,6 +454,14 @@ static inline void ak60211_dev_unlock(struct ak60211_if_data *dev)
 	__release(&dev->mtx);
 }
 
+static inline void ak60211_mesh_plink_fsm_restart(struct ak60211_sta_info *sta)
+{
+	sta->plink_state = AK60211_PLINK_LISTEN;
+	sta->reason = 0;
+	sta->plid = 0;
+	sta->llid = 0;
+	/* sta->llid = sta->plid = sta->reason = 0; */
+}
 extern struct net_bridge_hmc *plc;
 extern bool plc_dbg;
 
@@ -478,5 +510,6 @@ void ak60211_preq_test_wq(struct work_struct *work);
 void ak60211_mpath_queue_preq_new(struct hmc_hybrid_path *hmpath);
 int __ak60211_mpath_queue_preq_new(struct ak60211_if_data *ifmsh,
 				   struct hmc_hybrid_path *hmpath, u8 flags);
+void ak60211_mplink_timer(struct timer_list *t);
 
 #endif
