@@ -311,7 +311,9 @@ static int pr_debug_en;
 static int pid_of_sender;
 static int pid_of_receiver;
 static unsigned int if_index;
+static unsigned int if_index_recv;
 static unsigned int command_type;
+static unsigned int command_type_recv;
 static unsigned int is_nl60211_in_recv;
 static unsigned int is_nl60211_in_recv_once;
 static unsigned char recv_ether_type[2];
@@ -894,11 +896,11 @@ static int nl60211_rx_callback_proto_filter(size_t len, u8 *data)
 	NETLINK_CB(skb_res).dst_group = 0; /* not in mcast group */
 
 	//copy input command to response
-	snap_res->nl_msghdr.nlmsg_type = command_type;
-	snap_res->if_index = if_index;
+	snap_res->nl_msghdr.nlmsg_type = command_type_recv;
+	snap_res->if_index = if_index_recv;
 
 	res_payload = (struct nl60211_recv_res *)snap_res->buf;
-	res_payload->return_code = 113;
+	res_payload->return_code = 0;
 	res_payload->recv_len = len;
 	memcpy(res_payload->recv_buf, data, len);
 
@@ -927,7 +929,9 @@ int nl60211_rx_callback(struct sk_buff *skb)
 		return 0;
 
 	do {
-		if (len < 14)
+		if (len < 46)
+			break;
+		if (len > 1500)
 			break;
 		if (data[12] != recv_ether_type[0])
 			break;
@@ -965,9 +969,8 @@ static void nl60211_netlink_input(struct sk_buff *skb_in)
 
 	pr_info("\nEntering: %s\n", __func__);
 	if (pr_debug_en) {
-		//pr_info("Netlink received msg payload:%s\n", (char*)nlmsg_data(nlh));
-		pr_info("skb_in: len=%d, data_len=%d, mac_len=%d\n", skb_in->len,
-			skb_in->data_len, skb_in->mac_len);
+		pr_info("skb_in: len=%d, data_len=%d, mac_len=%d\n",
+			skb_in->len, skb_in->data_len, skb_in->mac_len);
 		pr_info("skb_in          = %p\n", skb_in);
 		pr_info("skb_in->data    = %p\n", skb_in->data);
 		pr_info("nlh             = %p\n", nlh);
@@ -997,9 +1000,13 @@ static void nl60211_netlink_input(struct sk_buff *skb_in)
 		nl60211_cmd_setmeshid(nlreq);
 		break;
 	case NL60211_RECV:
+		if_index_recv = if_index;
+		command_type_recv = command_type;
 		nl60211_cmd_recv(nlreq);
 		break;
 	case NL60211_RECV_ONCE:
+		if_index_recv = if_index;
+		command_type_recv = command_type;
 		nl60211_cmd_recv_once(nlreq);
 		break;
 	case NL60211_RECV_CANCEL:

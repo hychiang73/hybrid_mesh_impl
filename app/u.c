@@ -75,11 +75,11 @@ enum {
 	NL60211_SEND_BEST,     // snap sendbest    br0 ff ff ff ff ff ff 00...
 	NL60211_GETSA,         // snap getsa       br0
 
-	NL60211_ADD_MPATH,
-	NL60211_DEL_MPATH,
-	NL60211_SET_MPATH,
-	NL60211_GET_MPATH,
-	NL60211_DUMP_MPATH,
+	NL60211_ADD_MPATH,     // snap addmpath    br0 00 11 22 33 44 55
+	NL60211_DEL_MPATH,     // snap delmpath    br0 00 11 22 33 44 55
+	NL60211_SET_MPATH,     // Reserved
+	NL60211_GET_MPATH,     // snap getmpath    br0 00 11 22 33 44 55
+	NL60211_DUMP_MPATH,    // snap dumpmpath
 };
 
 // inside nl60211msg.buf
@@ -267,7 +267,8 @@ struct sockaddr_nl src_addr, dest_addr;
 //struct nlmsghdr *nlh = NULL;
 //struct iovec iov;
 int sock_fd;
-struct nl60211skmsg sk_msg;
+struct nl60211skmsg sk_msg_send;
+struct nl60211skmsg sk_msg_recv;
 
 int if_nl_init(void)
 {
@@ -297,7 +298,7 @@ int if_nl_deinit(void)
 
 int if_nl_send(uint16_t type, unsigned int if_index, uint32_t buf_len)
 {
-	struct nl60211msg *msg = &(sk_msg.nl_msg);
+	struct nl60211msg *msg = &(sk_msg_send.nl_msg);
 
 	if (buf_len > MAX_PAYLOAD)
 		return -1;
@@ -312,34 +313,34 @@ int if_nl_send(uint16_t type, unsigned int if_index, uint32_t buf_len)
 	msg->if_index = if_index;
 
 	// 2. add netlink message to iov
-	sk_msg.iov.iov_base = (void *)msg;
-	sk_msg.iov.iov_len = msg->nl_msghdr.nlmsg_len;
+	sk_msg_send.iov.iov_base = (void *)msg;
+	sk_msg_send.iov.iov_len = msg->nl_msghdr.nlmsg_len;
 
 	// 3. combine iov to socket message iov
-	sk_msg.sk_msghdr.msg_iov = &(sk_msg.iov);
-	sk_msg.sk_msghdr.msg_iovlen = 1;
+	sk_msg_send.sk_msghdr.msg_iov = &(sk_msg_send.iov);
+	sk_msg_send.sk_msghdr.msg_iovlen = 1;
 
 	// 4. set destination address
-	sk_msg.sk_msghdr.msg_name = (void *)&dest_addr;
-	sk_msg.sk_msghdr.msg_namelen = sizeof(dest_addr);
+	sk_msg_send.sk_msghdr.msg_name = (void *)&dest_addr;
+	sk_msg_send.sk_msghdr.msg_namelen = sizeof(dest_addr);
 
 	//ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags);
-	sendmsg(sock_fd, &(sk_msg.sk_msghdr), 0);
+	sendmsg(sock_fd, &(sk_msg_send.sk_msghdr), 0);
 	return 0;
 }
 
 int if_nl_recv(void)
 {
-	struct nl60211msg *msg = &(sk_msg.nl_msg);
+	struct nl60211msg *msg = &(sk_msg_recv.nl_msg);
 
-	sk_msg.iov.iov_base = (void *)msg;
-	sk_msg.iov.iov_len = sizeof(struct nl60211msg);
+	sk_msg_recv.iov.iov_base = (void *)msg;
+	sk_msg_recv.iov.iov_len = sizeof(struct nl60211msg);
 
-	sk_msg.sk_msghdr.msg_iov = &(sk_msg.iov);
-	sk_msg.sk_msghdr.msg_iovlen = 1;
+	sk_msg_recv.sk_msghdr.msg_iov = &(sk_msg_recv.iov);
+	sk_msg_recv.sk_msghdr.msg_iovlen = 1;
 
 	//ssize_t recvmsg(int sockfd, struct msghdr *msg, int flags);
-	recvmsg(sock_fd, &(sk_msg.sk_msghdr), 0);
+	recvmsg(sock_fd, &(sk_msg_recv.sk_msghdr), 0);
 	return 0;
 }
 
@@ -382,7 +383,7 @@ int do_debug(int argc, char **argv)
 	printf("debug start ... if = %s, idx = %d\n", argv[0], if_idx);
 	argc--;
 	argv++;
-	req = (struct nl60211_debug_req *)sk_msg.nl_msg.buf;
+	req = (struct nl60211_debug_req *)sk_msg_send.nl_msg.buf;
 	req->len = argc;
 	for (i = 0; i < argc; i++) {
 		if (sscanf(argv[i], "%x", &temp) == 0) {
@@ -399,7 +400,7 @@ int do_debug(int argc, char **argv)
 	do {
 		printf("debug recv ......\n");
 		if_nl_recv();
-		nlres = (struct nl60211msg *)&sk_msg.nl_msg;
+		nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
 		res = (struct nl60211_debug_res *)nlres->buf;
 		printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
 		printf("if_index    = %d\n", nlres->if_index);
@@ -428,7 +429,7 @@ int do_getmeshid(int argc, char **argv)
 
 	if_nl_send(NL60211_GETMESHID, if_idx, 0);
 	if_nl_recv();
-	nlres = (struct nl60211msg *)&sk_msg.nl_msg;
+	nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
 	res = (struct nl60211_getmeshid_res *)nlres->buf;
 	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
 	printf("if_index    = %d\n", nlres->if_index);
@@ -452,7 +453,7 @@ int do_setmeshid(int argc, char **argv)
 		printf("set mesh id of :%s, idx = %d, id = %s\n",
 		       argv[0], if_idx, argv[1]);
 	}
-	req = (struct nl60211_setmeshid_req *)sk_msg.nl_msg.buf;
+	req = (struct nl60211_setmeshid_req *)sk_msg_send.nl_msg.buf;
 	req->id_len = strlen(argv[1]);
 	memcpy(req->id, argv[1], req->id_len);
 	req->id[req->id_len] = 0; // '\0' for the end of C string
@@ -466,7 +467,7 @@ int do_setmeshid(int argc, char **argv)
 			1/* '\0' for teh end of C string */);
 
 	if_nl_recv();
-	nlres = (struct nl60211msg *)&sk_msg.nl_msg;
+	nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
 	res = (struct nl60211_setmeshid_res *)nlres->buf;
 	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
 	printf("if_index    = %d\n", nlres->if_index);
@@ -492,7 +493,7 @@ int do_recv(int argc, char **argv)
 		printf("ether_type must be 2 bytes!\n");
 		return -1;
 	}
-	req = (struct nl60211_recv_req *)sk_msg.nl_msg.buf;
+	req = (struct nl60211_recv_req *)sk_msg_send.nl_msg.buf;
 	if (sscanf(argv[0], "%x", &temp) == 0) {
 		printf("Error: not a hex string!\n");
 		exit(-1);
@@ -508,7 +509,7 @@ int do_recv(int argc, char **argv)
 	do {
 		printf("start recv ......\n");
 		if_nl_recv();
-		nlres = (struct nl60211msg *)&sk_msg.nl_msg;
+		nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
 		res = (struct nl60211_recv_res *)nlres->buf;
 		printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
 		printf("if_index    = %d\n", nlres->if_index);
@@ -542,7 +543,7 @@ int do_recvonce(int argc, char **argv)
 		printf("ether_type must be 2 bytes!\n");
 		return -1;
 	}
-	req = (struct nl60211_recv_req *)sk_msg.nl_msg.buf;
+	req = (struct nl60211_recv_req *)sk_msg_send.nl_msg.buf;
 	if (sscanf(argv[0], "%x", &temp) == 0) {
 		printf("Error: not a hex string!\n");
 		exit(-1);
@@ -558,7 +559,7 @@ int do_recvonce(int argc, char **argv)
 	do {
 		printf("start recv ......\n");
 		if_nl_recv();
-		nlres = (struct nl60211msg *)&sk_msg.nl_msg;
+		nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
 		res = (struct nl60211_recv_res *)nlres->buf;
 		printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
 		printf("if_index    = %d\n", nlres->if_index);
@@ -584,7 +585,7 @@ int do_recvcancel(int argc, char **argv)
 
 	if_nl_send(NL60211_RECV_CANCEL, if_idx, 0);
 	if_nl_recv();
-	nlres = (struct nl60211msg *)&sk_msg.nl_msg;
+	nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
 	res = (struct nl60211_getmeshid_res *)nlres->buf;
 	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
 	printf("if_index    = %d\n", nlres->if_index);
@@ -608,7 +609,7 @@ int do_sendplc(int argc, char **argv)
 	argc--;
 	argv++;
 
-	req = (struct nl60211_sendplc_req *)sk_msg.nl_msg.buf;
+	req = (struct nl60211_sendplc_req *)sk_msg_send.nl_msg.buf;
 	req->total_len = argc;
 	req_raw = req->da; //first
 	for (i = 0; i < argc; i++) {
@@ -624,7 +625,7 @@ int do_sendplc(int argc, char **argv)
 		sizeof(req->total_len) +/*da,sa,ether_type,payload*/argc);
 
 	if_nl_recv();
-	nlres = (struct nl60211msg *)&sk_msg.nl_msg;
+	nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
 	res = (struct nl60211_sendplc_res *)nlres->buf;
 	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
 	printf("if_index    = %d\n", nlres->if_index);
@@ -647,7 +648,7 @@ int do_sendwifi(int argc, char **argv)
 	argc--;
 	argv++;
 
-	req = (struct nl60211_sendwifi_req *)sk_msg.nl_msg.buf;
+	req = (struct nl60211_sendwifi_req *)sk_msg_send.nl_msg.buf;
 	req->total_len = argc;
 	req_raw = req->da; //first
 	for (i = 0; i < argc; i++) {
@@ -663,7 +664,7 @@ int do_sendwifi(int argc, char **argv)
 		sizeof(req->total_len) +/*da,sa,ether_type,payload*/argc);
 
 	if_nl_recv();
-	nlres = (struct nl60211msg *)&sk_msg.nl_msg;
+	nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
 	res = (struct nl60211_sendwifi_res *)nlres->buf;
 	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
 	printf("if_index    = %d\n", nlres->if_index);
@@ -687,7 +688,7 @@ int do_sendflood(int argc, char **argv)
 	argc--;
 	argv++;
 
-	req = (struct nl60211_sendflood_req *)sk_msg.nl_msg.buf;
+	req = (struct nl60211_sendflood_req *)sk_msg_send.nl_msg.buf;
 	req->total_len = argc;
 	req_raw = req->da; //first
 	for (i = 0; i < argc; i++) {
@@ -704,7 +705,7 @@ int do_sendflood(int argc, char **argv)
 		sizeof(req->total_len) +/*da,sa,ether_type,payload*/argc);
 
 	if_nl_recv();
-	nlres = (struct nl60211msg *)&sk_msg.nl_msg;
+	nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
 	res = (struct nl60211_sendflood_res *)nlres->buf;
 	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
 	printf("if_index    = %d\n", nlres->if_index);
@@ -728,7 +729,7 @@ int do_sendbest(int argc, char **argv)
 	argc--;
 	argv++;
 
-	req = (struct nl60211_sendbest_req *)sk_msg.nl_msg.buf;
+	req = (struct nl60211_sendbest_req *)sk_msg_send.nl_msg.buf;
 	req->total_len = argc;
 	req_raw = req->da; //first
 	for (i = 0; i < argc; i++) {
@@ -745,7 +746,7 @@ int do_sendbest(int argc, char **argv)
 		sizeof(req->total_len) +/*da,sa,ether_type,payload*/argc);
 
 	if_nl_recv();
-	nlres = (struct nl60211msg *)&sk_msg.nl_msg;
+	nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
 	res = (struct nl60211_sendbest_res *)nlres->buf;
 	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
 	printf("if_index    = %d\n", nlres->if_index);
@@ -767,7 +768,7 @@ int do_getsa(int argc, char **argv)
 
 	if_nl_send(NL60211_GETSA, if_idx, 0);
 	if_nl_recv();
-	nlres = (struct nl60211msg *)&sk_msg.nl_msg;
+	nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
 	res = (struct nl60211_getsa_res *)nlres->buf;
 	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
 	printf("if_index    = %d\n", nlres->if_index);
@@ -786,8 +787,7 @@ int do_addmpath(int argc, char **argv)
 {
 	unsigned int if_idx = nametoindex(argv[0]);
 	//request
-	struct nl60211_addmpath_req *req =
-		(struct nl60211_addmpath_req *)sk_msg.nl_msg.buf;
+	struct nl60211_addmpath_req *req;
 	//response
 	struct nl60211msg *nlres;
 	struct nl60211_addmpath_res *res;
@@ -799,7 +799,7 @@ int do_addmpath(int argc, char **argv)
 	if (argc != ETH_ALEN)
 		printf("Error: Must input %d bytes da!", ETH_ALEN);
 
-	req = (struct nl60211_addmpath_req *)sk_msg.nl_msg.buf;
+	req = (struct nl60211_addmpath_req *)sk_msg_send.nl_msg.buf;
 	for (i = 0; i < ETH_ALEN; i++) {
 		if (sscanf(argv[i], "%x", &temp) == 0) {
 			printf("Error: not a hex string!\n");
@@ -814,7 +814,7 @@ int do_addmpath(int argc, char **argv)
 		sizeof(struct nl60211_addmpath_req));
 
 	if_nl_recv();
-	nlres = (struct nl60211msg *)&sk_msg.nl_msg;
+	nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
 	res = (struct nl60211_addmpath_res *)nlres->buf;
 	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
 	printf("if_index    = %d\n", nlres->if_index);
@@ -826,8 +826,7 @@ int do_delmpath(int argc, char **argv)
 {
 	unsigned int if_idx = nametoindex(argv[0]);
 	//request
-	struct nl60211_delmpath_req *req =
-		(struct nl60211_delmpath_req *)sk_msg.nl_msg.buf;
+	struct nl60211_delmpath_req *req;
 	//response
 	struct nl60211msg *nlres;
 	struct nl60211_delmpath_res *res;
@@ -839,7 +838,7 @@ int do_delmpath(int argc, char **argv)
 	if (argc != ETH_ALEN)
 		printf("Error: Must input %d bytes da!", ETH_ALEN);
 
-	req = (struct nl60211_delmpath_req *)sk_msg.nl_msg.buf;
+	req = (struct nl60211_delmpath_req *)sk_msg_send.nl_msg.buf;
 	for (i = 0; i < ETH_ALEN; i++) {
 		if (sscanf(argv[i], "%x", &temp) == 0) {
 			printf("Error: not a hex string!\n");
@@ -854,7 +853,7 @@ int do_delmpath(int argc, char **argv)
 		sizeof(struct nl60211_delmpath_req));
 
 	if_nl_recv();
-	nlres = (struct nl60211msg *)&sk_msg.nl_msg;
+	nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
 	res = (struct nl60211_delmpath_res *)nlres->buf;
 	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
 	printf("if_index    = %d\n", nlres->if_index);
@@ -871,8 +870,7 @@ int do_getmpath(int argc, char **argv)
 {
 	unsigned int if_idx = nametoindex(argv[0]);
 	//request
-	struct nl60211_getmpath_req *req =
-		(struct nl60211_getmpath_req *)sk_msg.nl_msg.buf;
+	struct nl60211_getmpath_req *req;
 	//response
 	struct nl60211msg *nlres;
 	struct nl60211_getmpath_res *res;
@@ -884,7 +882,7 @@ int do_getmpath(int argc, char **argv)
 	if (argc != ETH_ALEN)
 		printf("Error: Must input %d bytes da!", ETH_ALEN);
 
-	req = (struct nl60211_getmpath_req *)sk_msg.nl_msg.buf;
+	req = (struct nl60211_getmpath_req *)sk_msg_send.nl_msg.buf;
 	for (i = 0; i < ETH_ALEN; i++) {
 		if (sscanf(argv[i], "%x", &temp) == 0) {
 			printf("Error: not a hex string!\n");
@@ -899,7 +897,7 @@ int do_getmpath(int argc, char **argv)
 		sizeof(struct nl60211_getmpath_req));
 
 	if_nl_recv();
-	nlres = (struct nl60211msg *)&sk_msg.nl_msg;
+	nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
 	res = (struct nl60211_getmpath_res *)nlres->buf;
 	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
 	printf("if_index    = %d\n", nlres->if_index);
@@ -932,7 +930,7 @@ int do_dumpmpath(int argc, char **argv)
 
 	while (1) {
 		if_nl_recv();
-		nlres = (struct nl60211msg *)&sk_msg.nl_msg;
+		nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
 		res = (struct nl60211_getmpath_res *)nlres->buf;
 		if (res->return_code < 0)
 			break;
@@ -942,7 +940,7 @@ int do_dumpmpath(int argc, char **argv)
 		printf("%02X:%02X:%02X:%02X:%02X:%02X     ",
 		       res->da[0], res->da[1], res->da[2],
 		       res->da[3], res->da[4], res->da[5]);
-		printf("%-10d %-10d %-10d %-10d\n",
+		printf("%-10d %-10d 0x%-8X %-10d\n",
 		       res->sn, res->metric, res->flags, res->egress);
 	}
 	return 0;
