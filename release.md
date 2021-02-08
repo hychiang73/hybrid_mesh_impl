@@ -5,6 +5,7 @@
   * Add the command to get mesh table
   * PLC Mesh beacon will be sent peridoically when modules is loaded.
   * Add PLC mesh peering open retry and close mechnism.
+  * Fix command tye of recv response mismatch problem in nl60211.
 ---
 * v0.1
   * Created hybrid mesh in bridge
