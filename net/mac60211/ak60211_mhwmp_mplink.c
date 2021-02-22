@@ -926,7 +926,7 @@ void ak60211_mesh_rx_plink_frame(struct ak60211_if_data *ifmsh,
 
 	sta = mesh_info(ifmsh, buff->plchdr.machdr.h_addr4);
 
-	// TODO: check rssi threshold
+	/* TODO: check rssi threshold */
 	event = ak60211_plink_get_event(ifmsh, ftype, plid, llid, buff, sta);
 
 	if (event == OPN_ACPT) {
