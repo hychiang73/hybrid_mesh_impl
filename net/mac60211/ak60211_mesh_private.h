@@ -417,6 +417,21 @@ struct prep_pkts {
 	u32		fcs;
 } __packed;
 
+struct perr_pkts {
+	u8		category;
+	u8		action;
+	struct {
+		u8			tag;
+		u8			len;
+		u8			ttl;
+		u8			flags;
+		u8			h_targetaddr[ETH_ALEN];
+		u8			target_sn;
+		u16			target_rcode;
+	} __packed elem;
+	u32		fcs;
+} __packed;
+
 struct self_prot {
 	u8		category;
 	u8		action;
@@ -436,7 +451,8 @@ struct plc_packet_union {
 		struct beacon_pkts	beacon;
 		struct preq_pkts	preq;
 		struct prep_pkts	prep;
-	struct self_prot	self;
+		struct perr_pkts	perr;
+		struct self_prot	self;
 	} un;
 };
 
@@ -511,5 +527,7 @@ void ak60211_mpath_queue_preq_new(struct hmc_hybrid_path *hmpath);
 int __ak60211_mpath_queue_preq_new(struct ak60211_if_data *ifmsh,
 				   struct hmc_hybrid_path *hmpath, u8 flags);
 void ak60211_mplink_timer(struct timer_list *t);
+int ak60211_mpath_error_tx(struct ak60211_if_data *ifmsh, u8 ttl, const u8 *target,
+							u32 target_sn, u16 target_rcode, const u8 *ra);
 
 #endif

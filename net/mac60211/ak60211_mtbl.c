@@ -203,8 +203,8 @@ static void __ak60211_mpath_del(struct ak60211_mesh_table *tbl,
 
 	memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
 	plc->path->flags = 0;
-	plc->path->sn = 0;//mpath->sn;
-	plc->path->metric = 0;//MAX_METRIC;
+	plc->path->sn = 0;/* mpath->sn; */
+	plc->path->metric = 0;/* MAX_METRIC; */
 	plc_debug("mpath del, inform br-hmc to update status\n");
 	br_hmc_path_update(plc);
 
