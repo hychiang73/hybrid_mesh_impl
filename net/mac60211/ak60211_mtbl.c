@@ -27,7 +27,7 @@ inline bool ak60211_mplink_availables(struct ak60211_if_data *ifmsh)
 	int freecnt = ifmsh->mshcfg.MeshMaxPeerLinks -
 					atomic_read(&ifmsh->estab_plinks);
 
-	return (min_t(long, freecnt, MESH_MAX_PLINKS - ifmsh->num_sta)) > 0;
+	return (min_t(long, freecnt, PLC_MESH_MAX_PLINKS - ifmsh->num_sta)) > 0;
 }
 
 static struct rhlist_head *ak60211_sta_info_hash_lookup(struct ak60211_if_data *local,
@@ -201,12 +201,12 @@ static void __ak60211_mpath_del(struct ak60211_mesh_table *tbl,
 {
 	PLC_TRACE();
 
-	memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
-	plc->path->flags = 0;
-	plc->path->sn = 0;//mpath->sn;
-	plc->path->metric = 0;//MAX_METRIC;
-	plc_debug("mpath del, inform br-hmc to update status\n");
-	br_hmc_path_update(plc);
+	//memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
+	//plc->path->flags = 0;
+	//plc->path->sn = 0;//mpath->sn;
+	//plc->path->metric = 0;//MAX_METRIC;
+	//plc_debug("mpath del, inform br-hmc to update status\n");
+	//br_hmc_path_update(plc);
 
 	hlist_del_rcu(&mpath->walk_list);
 	rhashtable_remove_fast(&tbl->rhead, &mpath->rhash,
@@ -304,27 +304,28 @@ void ak60211_mpath_timer(struct timer_list *t)
 		mpath->flags &= ~(PLC_MESH_PATH_RESOLVING | PLC_MESH_PATH_RESOLVING);
 		spin_unlock_bh(&mpath->state_lock);
 	} else if (mpath->discovery_retries < ifmsh->mshcfg.MeshHWMPmaxPREQretries) {
-		struct hmc_hybrid_path hmpath;
+		//struct hmc_hybrid_path hmpath;
 
-		memcpy(hmpath.dst, mpath->dst, ETH_ALEN);
-		hmpath.sn = mpath->sn;
+		//memcpy(hmpath.dst, mpath->dst, ETH_ALEN);
+		//hmpath.sn = mpath->sn;
 		++mpath->discovery_retries;
 		mpath->discovery_timeout *= 2;
 		mpath->flags &= ~PLC_MESH_PATH_REQ_QUEUED;
 		spin_unlock_bh(&mpath->state_lock);
-		__ak60211_mpath_queue_preq_new(ifmsh, &hmpath, 0);
+		//__ak60211_mpath_queue_preq_new(ifmsh, &hmpath, 0);
+		__ak60211_mpath_queue_preq_new(ifmsh, mpath->dst, 0);
 	} else {
 		mpath->flags &= ~(PLC_MESH_PATH_RESOLVING |
 				  PLC_MESH_PATH_RESOLVED | PLC_MESH_PATH_REQ_QUEUED);
 		mpath->exp_time = jiffies;
 
-		memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
-		plc->path->flags = mpath->flags;
-		plc->path->sn = mpath->sn;
-		plc->path->metric = MAX_METRIC;
-		plc_debug("mpath discovery retry max, stop send preq\n");
-		br_hmc_path_update(plc);
-		spin_unlock_bh(&mpath->state_lock);
+		//memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
+		//plc->path->flags = mpath->flags;
+		//plc->path->sn = mpath->sn;
+		//plc->path->metric = MAX_METRIC;
+		//plc_debug("mpath discovery retry max, stop send preq\n");
+		//br_hmc_path_update(plc);
+		//spin_unlock_bh(&mpath->state_lock);
 	}
 }
 
@@ -414,6 +415,7 @@ struct ak60211_mesh_path *ak60211_mpath_lookup(struct ak60211_if_data *ifmsh,
 
 	return mpath;
 }
+EXPORT_SYMBOL(ak60211_mpath_lookup);
 
 static void ak60211_mpath_rht_free(void *ptr, void *tblptr)
 {

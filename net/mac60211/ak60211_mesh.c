@@ -94,6 +94,12 @@ const struct rhashtable_params ak60211_sta_rht_params = {
 	//.max_size = CONFIG_MAC80211_STA_HASH_MAX_SIZE,
 };
 
+struct ak60211_if_data *ak60211_dev_to_ifdata(void)
+{
+	return &plcdev;
+}
+EXPORT_SYMBOL(ak60211_dev_to_ifdata);
+
 void ak60211_pkt_hex_dump(struct sk_buff *skb, const char *type, int offset)
 {
 	size_t len;
@@ -264,7 +270,7 @@ void ak60211_mesh_plink_frame_tx(struct ak60211_if_data *ifmsh,
 
 	ak60211_pkt_hex_dump(nskb, "ak60211_send", 0);
 
-	br_hmc_forward(nskb, plc);
+	hmc_xmit(nskb, HMC_PORT_PLC);
 }
 
 int ak60211_mpath_sel_frame_tx(enum ak60211_mpath_frame_type action, u8 flags,
@@ -372,7 +378,7 @@ int ak60211_mpath_sel_frame_tx(enum ak60211_mpath_frame_type action, u8 flags,
 	skb_reset_mac_header(skb);
 
 	ak60211_pkt_hex_dump(skb, "ak60211_mpath_sel_frame_tx", 0);
-	br_hmc_forward(skb, plc);
+	hmc_xmit(skb, HMC_PORT_PLC);
 
 	return true;
 }
@@ -587,8 +593,14 @@ void plc_send_beacon(void)
 			 sizeof(struct plc_hdr) +
 			 sizeof(struct beacon_pkts);
 	u8 *pos;
+	u8 local_addr[ETH_ALEN] = {0};
 
 	PLC_TRACE();
+
+	if (hmc_get_dev_addr(local_addr) < 0 || !is_valid_ether_addr(local_addr)) {
+		plc_err("Invaild local mac address\n");
+		return;
+	}
 
 	// beacon packet size is 92 bytes
 	nskb = dev_alloc_skb(2 + beacon_len + 2);
@@ -602,10 +614,10 @@ void plc_send_beacon(void)
 	pos = skb_put_zero(nskb, beacon_len);
 
 	plc_fill_ethhdr((u8 *)&sbeacon, broadcast_addr,
-			plc->br_addr, ntohs(0xAA55));
+			local_addr, ntohs(0xAA55));
 
-	memcpy(sbeacon.plchdr.machdr.h_addr2, plc->br_addr, ETH_ALEN);
-	memcpy(sbeacon.plchdr.machdr.h_addr4, plc->br_addr, ETH_ALEN);
+	memcpy(sbeacon.plchdr.machdr.h_addr2, local_addr, ETH_ALEN);
+	memcpy(sbeacon.plchdr.machdr.h_addr4, local_addr, ETH_ALEN);
 
 	memcpy(pos, &sbeacon, beacon_len);
 
@@ -617,44 +629,12 @@ void plc_send_beacon(void)
 
 	ak60211_pkt_hex_dump(nskb, "plc_beacon_send", 0);
 
-	br_hmc_forward(nskb, plc);
+	hmc_xmit(nskb, HMC_PORT_PLC);
 }
 
-void ak60211_preq_test_wq(struct work_struct *work)
+int ak60211_mpath_queue_preq_new(const u8 *addr)
 {
-	struct ak60211_mesh_path *mpath;
-	u8 ttl = 0;
-	u32 lifetime = 0;
-
-	PLC_TRACE();
-
-	mpath = ak60211_mpath_lookup(&plcdev, plc->path->dst);
-	if (!mpath) {
-		mpath = ak60211_mpath_add(&plcdev, plc->path->dst);
-		if (!mpath) {
-			plc_err("mpath build up fail\n");
-			return;
-		}
-	}
-
-	plcdev.sn = plc->path->sn;
-	mpath->flags |= PLC_MESH_PATH_RESOLVING;
-	ttl = MAX_MESH_TTL;
-	lifetime = MSEC_TO_TU(AK60211_MESH_HWMP_PATH_TIMEOUT);
-	ak60211_mpath_sel_frame_tx(AK60211_MPATH_PREQ, mpath->flags,
-				   plcdev.addr, plcdev.sn, mpath->dst,
-				   mpath->sn, broadcast_addr, 0, ttl,
-				   lifetime, 0, ++plcdev.preq_id, &plcdev);
-
-	//plc->path->flags = mpath->flags;
-	plc->path->flags = BR_HMC_PATH_ACTIVE;
-
-	br_hmc_path_update(plc);
-}
-
-void ak60211_mpath_queue_preq_new(struct hmc_hybrid_path *hmpath)
-{
-	__ak60211_mpath_queue_preq_new(&plcdev, hmpath, AK60211_PREQ_START);
+	return __ak60211_mpath_queue_preq_new(&plcdev, addr, AK60211_PREQ_START);
 }
 
 void ak60211_mpath_queue_preq(const u8 *dst, u32 hmc_sn)
@@ -686,7 +666,7 @@ void ak60211_iface_work(struct work_struct *work)
 	    ifmsh->last_preq + msecs_to_jiffies(ifmsh->mshcfg.MeshHWMPpreqMinInterval)))
 		ak60211_mpath_start_discovery(ifmsh);
 
-	if (test_and_clear_bit(MESH_WORK_HOUSEKEEPING, &ifmsh->wrkq_flags))
+	if (test_and_clear_bit(AK60211_MESH_WORK_HOUSEKEEPING, &ifmsh->wrkq_flags))
 		ak60211_mesh_housekeeping(ifmsh);
 out:
 	ak60211_dev_unlock(ifmsh);
@@ -775,7 +755,7 @@ static void ak60211_mesh_housekeeping_timer(struct timer_list *t)
 	struct ak60211_if_data *ifmsh =
 	    from_timer(ifmsh, t, housekeeping_timer);
 
-	set_bit(MESH_WORK_HOUSEKEEPING, &plcdev.wrkq_flags);
+	set_bit(AK60211_MESH_WORK_HOUSEKEEPING, &plcdev.wrkq_flags);
 	queue_work(ifmsh->workqueue, &ifmsh->work);
 }
 
@@ -820,7 +800,7 @@ bool ak60211_mesh_init(u8 *id, u8 *mac)
 
 	timer_setup(&plcdev.housekeeping_timer,
 		    ak60211_mesh_housekeeping_timer, 0);
-	set_bit(MESH_WORK_HOUSEKEEPING, &plcdev.wrkq_flags);
+	set_bit(AK60211_MESH_WORK_HOUSEKEEPING, &plcdev.wrkq_flags);
 	atomic_set(&plcdev.mpaths, 0);
 	plcdev.last_preq = jiffies;
 

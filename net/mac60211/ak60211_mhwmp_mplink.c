@@ -53,17 +53,16 @@ ak60211_next_hop_deref_protected(struct ak60211_mesh_path *mpath)
 }
 
 int __ak60211_mpath_queue_preq_new(struct ak60211_if_data *ifmsh,
-				   struct hmc_hybrid_path *hmpath,
+				   const u8 *dst,
 				   u8 flags)
 {
 	struct ak60211_mesh_path *mpath;
 	struct ak60211_mesh_preq_queue *preq_node;
-	u8 *target_addr = hmpath->dst;
 
 	PLC_TRACE();
-	mpath = ak60211_mpath_lookup(ifmsh, target_addr);
+	mpath = ak60211_mpath_lookup(ifmsh, dst);
 	if (!mpath) {
-		mpath = ak60211_mpath_add(ifmsh, target_addr);
+		mpath = ak60211_mpath_add(ifmsh, dst);
 		if (IS_ERR(mpath)) {
 			/* mesh_path_discard_frame*/
 			plc_err("is_err\n");
@@ -92,7 +91,7 @@ int __ak60211_mpath_queue_preq_new(struct ak60211_if_data *ifmsh,
 		return false;
 	}
 
-	mpath->sn = hmpath->sn;
+//	mpath->sn = hmpath->sn;
 	memcpy(preq_node->dst, mpath->dst, ETH_ALEN);
 	preq_node->flags = flags;
 
@@ -218,13 +217,13 @@ static u32 ak60211_hwmp_route_info_get(struct ak60211_if_data *ifmsh,
 			/* TODO: ewma_mesh_fail_avg */
 
 			/* information for BR-HMC */
-			memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
-			plc->path->flags = mpath->flags;
-			plc->path->sn = mpath->sn;
-			plc->path->metric = mpath->metric;
-			plc_debug("flags:0x%x, sn:0x%x, metric:0x%x\n",
-				  plc->path->flags, plc->path->sn, plc->path->metric);
-			br_hmc_path_update(plc);
+			//memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
+			//plc->path->flags = mpath->flags;
+			//plc->path->sn = mpath->sn;
+			//plc->path->metric = mpath->metric;
+			//plc_debug("flags:0x%x, sn:0x%x, metric:0x%x\n",
+			//	  plc->path->flags, plc->path->sn, plc->path->metric);
+			//br_hmc_path_update(plc);
 		} else {
 			spin_unlock_bh(&mpath->state_lock);
 		}
@@ -268,13 +267,13 @@ static u32 ak60211_hwmp_route_info_get(struct ak60211_if_data *ifmsh,
 		/* todo: ewma_mesh_fail_avg */
 
 		/* information for BR-HMC */
-		memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
-		plc->path->flags = mpath->flags;
-		plc->path->sn = mpath->sn;
-		plc->path->metric = mpath->metric;
-		plc_debug("flags:0x%x, sn:0x%x, metric:0x%x\n",
-			  plc->path->flags, plc->path->sn, plc->path->metric);
-		br_hmc_path_update(plc);
+		//memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
+		//plc->path->flags = mpath->flags;
+		//plc->path->sn = mpath->sn;
+		//plc->path->metric = mpath->metric;
+		//plc_debug("flags:0x%x, sn:0x%x, metric:0x%x\n",
+		//	  plc->path->flags, plc->path->sn, plc->path->metric);
+		//br_hmc_path_update(plc);
 	}
 
 	rcu_read_unlock();
@@ -547,13 +546,13 @@ void ak60211_mpath_start_discovery(struct ak60211_if_data *ifmsh)
 	spin_unlock_bh(&mpath->state_lock);
 	da = broadcast_addr;
 
-	memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
-	plc->path->flags = mpath->flags;
-	plc->path->sn = mpath->sn;
-	plc->path->metric = MAX_METRIC;
-	plc_debug("flags:0x%x, sn:0x%x, metric:0x%x\n", plc->path->flags,
-		  plc->path->sn, plc->path->metric);
-	br_hmc_path_update(plc);
+	//memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
+	//plc->path->flags = mpath->flags;
+	//plc->path->sn = mpath->sn;
+	//plc->path->metric = MAX_METRIC;
+	//plc_debug("flags:0x%x, sn:0x%x, metric:0x%x\n", plc->path->flags,
+	//	  plc->path->sn, plc->path->metric);
+	//br_hmc_path_update(plc);
 
 	ak60211_mpath_sel_frame_tx(AK60211_MPATH_PREQ, 0, ifmsh->addr,
 				   ifmsh->sn, mpath->dst, mpath->sn, da,

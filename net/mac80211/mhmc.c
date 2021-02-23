@@ -10,7 +10,7 @@ int mhmc_parse_before_deliver(struct sk_buff *skb)
 	struct ethhdr *ether;
 
 	skb_reset_mac_header(skb);
-	hmc_print_skb(skb, "mhmc_parse_before_deliver", 0);
+	//hmc_print_skb(skb, "mhmc_parse_before_deliver", 0);
 
 	ether = eth_hdr(skb);
 	//pr_info("Protocol: %x\n", htons(ether->h_proto));
@@ -25,7 +25,7 @@ int mhmc_parse_before_deliver(struct sk_buff *skb)
 }
 EXPORT_SYMBOL(mhmc_parse_before_deliver);
 
-void hmc_print_skb(struct sk_buff *skb, const char *type, int offset)
+void mhmc_print_skb(struct sk_buff *skb, const char *type, int offset)
 {
 #if 0
 	size_t len;

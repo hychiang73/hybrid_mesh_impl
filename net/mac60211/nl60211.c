@@ -2,7 +2,7 @@
 
 #if IN_JETSON
 #include "nl60211.h"
-#include "../bridge/br_hmc.h"
+#include "hmc.h"
 #endif
 
 #include <linux/module.h>
@@ -213,9 +213,6 @@ struct nl60211msg {
 	// netlink payload end
 };
 
-#if IN_JETSON
-struct net_bridge_hmc *snap;
-#endif
 void test_hmc_gen_pkt_snap(
 	unsigned int total_len,
 	unsigned char *raw,
@@ -232,6 +229,7 @@ void test_hmc_gen_pkt_snap(
 	u8 da[ETH_ALEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 	u8 sa[ETH_ALEN] = {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff};
 	u8 *pos;
+	int egress = -1;;
 
 	for (i = 0; i < total_len; i++) {
 		if (i < 6) {
@@ -285,24 +283,24 @@ void test_hmc_gen_pkt_snap(
 
 	skb_reset_mac_header(new_sk);
 
-	br_hmc_print_skb(new_sk, "test_hmc_gen_pkt_snap", 0);
+	hmc_print_skb(new_sk, "test_hmc_gen_pkt_snap");
 
 	switch (type) {
 	case NL60211_SEND_PLC:
-		snap->egress = HMC_PORT_PLC;
+		egress = HMC_PORT_PLC;
 		break;
 	case NL60211_SEND_WIFI:
-		snap->egress = HMC_PORT_WIFI;
+		egress = HMC_PORT_WIFI;
 		break;
 	case NL60211_SEND_FLOOD:
-		snap->egress = HMC_PORT_FLOOD;
+		egress = HMC_PORT_FLOOD;
 		break;
 	case NL60211_SEND_BEST:
-		snap->egress = HMC_PORT_FLOOD;
+		egress = HMC_PORT_FLOOD;
 		break;
 	}
 
-	br_hmc_forward(new_sk, snap);
+	hmc_xmit(new_sk, egress);
 #endif
 }
 
@@ -675,6 +673,7 @@ static void nl60211_cmd_getsa(struct nl60211msg *nlreq)
 	u32 nlmsgsize;
 	s32 return_code = 0;
 	int ret;
+	u8 local_addr[ETH_ALEN] = {0};
 	//local
 	//temp
 
@@ -701,7 +700,8 @@ static void nl60211_cmd_getsa(struct nl60211msg *nlreq)
 	res = (struct nl60211_getsa_res *)nlres->buf;
 	res->return_code = return_code;
 	res->sa_len = 6;
-	memcpy(res->sa, snap->br_addr, 6);
+	hmc_get_dev_addr(local_addr);
+	memcpy(res->sa, local_addr, 6);
 
 	//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
 	ret = nlmsg_unicast(nl_sk, skbres, pid_of_sender);
@@ -715,7 +715,7 @@ static void nl60211_cmd_addmpath(struct nl60211msg *nlreq)
 	//request
 	struct nl60211_addmpath_req *req =
 		(struct nl60211_addmpath_req *)nlreq->buf;
-	struct hmc_path *mpath = br_hmc_path_add(req->da);
+	//struct hmc_path *mpath = br_hmc_path_add(req->da);
 	//response
 	//struct sk_buff *skbres;
 	//struct nl60211msg *nlres;
@@ -725,8 +725,8 @@ static void nl60211_cmd_addmpath(struct nl60211msg *nlreq)
 	s32 return_code = 0;
 
 	//response
-	if (IS_ERR(mpath))
-		return_code = (s32)PTR_ERR(mpath);
+	//if (IS_ERR(mpath))
+	//	return_code = (s32)PTR_ERR(mpath);
 
 	simpleres.return_code = return_code;
 	nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
@@ -738,13 +738,18 @@ static void nl60211_cmd_delmpath(struct nl60211msg *nlreq)
 	//request
 	struct nl60211_delmpath_req *req =
 		(struct nl60211_delmpath_req *)nlreq->buf;
-	int ret = br_hmc_path_del(req->da);
+	//int ret = br_hmc_path_del(req->da);
+	int ret = 0;
 	//response
 	//struct sk_buff *skbres;
 	//struct nl60211msg *nlres;
 	//struct nl60211_setmeshid_res *res;
 	//u32 nlmsgsize;
 	struct nl60211_delmpath_res simpleres;
+
+	if (hmc_fdb_del(req->da, HMC_PORT_PLC) < 0 ||
+		hmc_fdb_del(req->da, HMC_PORT_WIFI) < 0)
+		pr_info("Not found dest or port from table\n");
 
 	simpleres.return_code = (s32)ret;
 	nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
@@ -760,7 +765,8 @@ static void nl60211_cmd_getmpath(struct nl60211msg *nlreq)
 	//request
 	struct nl60211_getmpath_req *req =
 		(struct nl60211_getmpath_req *)nlreq->buf;
-	struct hmc_path *mpath = br_hmc_path_lookup(req->da);
+	//struct hmc_path *mpath = br_hmc_path_lookup(req->da);
+	struct hmc_fdb_entry *mpath = NULL; //add lookup
 	//response
 	struct sk_buff *skbres;
 	struct nl60211msg *nlres;
@@ -799,8 +805,8 @@ static void nl60211_cmd_getmpath(struct nl60211msg *nlreq)
 			res->sn = mpath->sn;
 			res->metric = mpath->metric;
 			res->flags = (u32)mpath->flags;
-			res->egress = (u32)mpath->egress;
-			memcpy(res->da, mpath->dst, ETH_ALEN);
+			res->egress = (u32)mpath->iface_id;
+			memcpy(res->da, mpath->addr, ETH_ALEN);
 		}
 	}
 
@@ -824,7 +830,7 @@ static void nl60211_cmd_dumpmpath(struct nl60211msg *nlreq)
 	int ret, ret_lookup;
 
 	while (1) {
-		ret_lookup = br_hmc_path_lookup_by_idx(&info, i);
+		//ret_lookup = br_hmc_path_lookup_by_idx(&info, i);
 		//if (ret_lookup < 0) {
 			//br_hmc_err("No path dummped.\n");
 			//return;
@@ -856,7 +862,7 @@ static void nl60211_cmd_dumpmpath(struct nl60211msg *nlreq)
 		res->sn = info.sn;
 		res->metric = info.metric;
 		res->flags = (u32)info.flags;
-		res->egress = (u32)info.egress;
+		res->egress = (u32)info.iface_id;
 		memcpy(res->da, info.dst, ETH_ALEN);
 
 		//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
@@ -1058,9 +1064,9 @@ int test_br_hmc_rx_snap(struct sk_buff *skb)
 	return 0;
 }
 
-static struct net_bridge_hmc_ops test_br_hmc_ops_f = {
-	.rx = test_br_hmc_rx_snap,
-};
+//static struct net_bridge_hmc_ops test_br_hmc_ops_f = {
+//	.rx = test_br_hmc_rx_snap,
+//};
 
 int nl60211_netlink_init(void)
 {
@@ -1076,8 +1082,6 @@ int nl60211_netlink_init(void)
 		pr_alert("Error creating socket.\n");
 		return -10;
 	}
-
-	snap = br_hmc_alloc("nl60211", &test_br_hmc_ops_f);
 
 	return 0;
 }

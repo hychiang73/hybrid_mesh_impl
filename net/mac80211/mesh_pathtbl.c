@@ -238,6 +238,7 @@ mesh_path_lookup(struct ieee80211_sub_if_data *sdata, const u8 *dst)
 {
 	return mpath_lookup(sdata->u.mesh.mesh_paths, dst, sdata);
 }
+EXPORT_SYMBOL(mesh_path_lookup);
 
 struct mesh_path *
 mpp_path_lookup(struct ieee80211_sub_if_data *sdata, const u8 *dst)
@@ -437,6 +438,7 @@ struct mesh_path *mesh_path_add(struct ieee80211_sub_if_data *sdata,
 	sdata->u.mesh.mesh_paths_generation++;
 	return new_mpath;
 }
+EXPORT_SYMBOL(mesh_path_add);
 
 int mpp_path_add(struct ieee80211_sub_if_data *sdata,
 		 const u8 *dst, const u8 *mpp)

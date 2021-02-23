@@ -40,7 +40,8 @@
 #include <linux/skbuff.h>
 #include <linux/jiffies.h>
 
-#include "../bridge/br_private.h"
+//#include "../bridge/br_private.h"
+#include "hmc.h"
 #include "mac60211.h"
 
 #define plc_debug(fmt, arg...)							\
@@ -70,7 +71,7 @@
 #define AK60211_MESH_HWMP_PATH_TIMEOUT	3000
 #define MAX_MESH_TTL	31
 #define MESH_TRAVERSAL_TIME  50
-#define MESH_MAX_PLINKS		16
+#define PLC_MESH_MAX_PLINKS		16
 #define MESH_MAX_PATHS	   1024
 #define MAX_METRIC	0xffffffff
 #define MSEC_TO_TU(x) ((x) * 1000 / 1024)
@@ -152,7 +153,7 @@ enum ak60211_sp_actioncode {
 };
 
 enum ak60211_mesh_task_flags {
-	MESH_WORK_HOUSEKEEPING,
+	AK60211_MESH_WORK_HOUSEKEEPING,
 };
 
 static const char * const mplstates[] = {
@@ -507,9 +508,14 @@ void __ak60211_mpath_queue_preq(struct ak60211_if_data *ifmsh,
 				const u8 *dst, u32 hmc_sn);
 void plc_send_beacon(void);
 void ak60211_preq_test_wq(struct work_struct *work);
-void ak60211_mpath_queue_preq_new(struct hmc_hybrid_path *hmpath);
+//void ak60211_mpath_queue_preq_new(struct hmc_hybrid_path *hmpath);
+//int __ak60211_mpath_queue_preq_new(struct ak60211_if_data *ifmsh,
+//				   struct hmc_hybrid_path *hmpath, u8 flags);
+int ak60211_mpath_queue_preq_new(const u8 *addr);
 int __ak60211_mpath_queue_preq_new(struct ak60211_if_data *ifmsh,
-				   struct hmc_hybrid_path *hmpath, u8 flags);
+									const u8 *dst, u8 flags);
+struct ak60211_if_data *ak60211_dev_to_ifdata(void);
+
 void ak60211_mplink_timer(struct timer_list *t);
 
 #endif
