@@ -91,7 +91,7 @@ const struct rhashtable_params ak60211_sta_rht_params = {
 	.head_offset = offsetof(struct ak60211_sta_info, hash_node),
 	.key_offset = offsetof(struct ak60211_sta_info, addr),
 	.key_len = ETH_ALEN,
-	//.max_size = CONFIG_MAC80211_STA_HASH_MAX_SIZE,
+	/* .max_size = CONFIG_MAC80211_STA_HASH_MAX_SIZE, */
 };
 
 struct ak60211_if_data *ak60211_dev_to_ifdata(void)
@@ -112,7 +112,6 @@ void ak60211_pkt_hex_dump(struct sk_buff *skb, const char *type, int offset)
 		return;
 
 	data = (u8 *)skb_mac_header(skb);
-   //data = (u8 *) skb->head;
 
 	if (skb_is_nonlinear(skb))
 		len = skb->data_len;
@@ -147,7 +146,7 @@ static int __must_check
 {
 	int ret;
 
-	// destroy part1
+	/* destroy part1 */
 	might_sleep();
 
 	if (!sta)
@@ -162,7 +161,7 @@ static int __must_check
 
 	list_del_rcu(&sta->list);
 
-	// destroy part2
+	/* destroy part2 */
 	ifmsh->num_sta--;
 	ifmsh->sta_generation++;
 
@@ -233,34 +232,35 @@ void ak60211_mesh_plink_frame_tx(struct ak60211_if_data *ifmsh,
 	plchdr->sn = ++ifmsh->mgmt_sn;
 
 	pos = skb_put_zero(nskb, 79);
-	// category
+	/* category */
 	*pos++ = WLAN_CATEGORY_SELF_PROTECTED;
 
-	// action
+	/* action */
 	*pos++ = action;
 
-	// meshid + meshconf
+	/* meshid + meshconf */
 	memcpy(pos, &local_prof, sizeof(local_prof));
 	pos = pos + sizeof(local_prof);
 
-	// mpm_elem
-	// mesh peer protocol
+	/* mpm_elem
+	 * mesh peer protocol
+	 */
 	*pos++ = 117;
 	*pos++ = 4;
 	put_unaligned_le16(0x0000, pos);
 	pos += 2;
 
-	// llid
+	/* llid */
 	put_unaligned_le16(llid, pos);
 	pos += 2;
 
-	// plid
+	/* plid */
 	if (action == AK60211_SP_MESH_PEERING_CONFIRM)
 		put_unaligned_le16(plid, pos);
 
 	pos += 2;
 
-	// reason
+	/* reason */
 	if (action == AK60211_SP_MESH_PEERING_CLOSE)
 		put_unaligned_le16(0x0, pos);
 
@@ -271,6 +271,61 @@ void ak60211_mesh_plink_frame_tx(struct ak60211_if_data *ifmsh,
 	ak60211_pkt_hex_dump(nskb, "ak60211_send", 0);
 
 	hmc_xmit(nskb, HMC_PORT_PLC);
+}
+
+int ak60211_mpath_error_tx(struct ak60211_if_data *ifmsh, u8 ttl,
+			   const u8 *target, u32 target_sn,
+			   u16 target_rcode, const u8 *ra)
+{
+	struct sk_buff *skb;
+	struct plc_packet_union *plcpkts;
+	u8 *pos;
+	int hdr_len = sizeof(struct ethhdr) + sizeof(struct plc_hdr) +
+		      sizeof(struct perr_pkts);
+	u8 sa[ETH_ALEN];
+
+	PLC_TRACE();
+	skb = dev_alloc_skb(2 + hdr_len + 2);
+
+	if (!skb)
+		return -1;
+
+	skb_reserve(skb, 2);
+
+	memcpy(sa, ifmsh->addr, ETH_ALEN);
+	pos = skb_put_zero(skb, hdr_len);
+	plc_fill_ethhdr(pos, ra, sa, ntohs(0xAA55));
+
+	plcpkts = (struct plc_packet_union *)pos;
+	plcpkts->plchdr.framectl = cpu_to_le16(AK60211_FTYPE_MGMT |
+					       AK60211_STYPE_ACTION);
+
+	memcpy(plcpkts->plchdr.machdr.h_addr1, ra, ETH_ALEN);
+	memcpy(plcpkts->plchdr.machdr.h_addr2, sa, ETH_ALEN);
+	memcpy(plcpkts->plchdr.machdr.h_addr3, ra, ETH_ALEN);
+	memcpy(plcpkts->plchdr.machdr.h_addr4, sa, ETH_ALEN);
+
+	plcpkts->un.perr.category = WLAN_CATEGORY_MESH_ACTION;
+	plcpkts->un.perr.action = WLAN_MESH_ACTION_HWMP_PATH_SELECTION;
+	pos = (u8 *)&plcpkts->un.perr.elem.tag;
+	*pos++ = WLAN_EID_PERR;
+	*pos++ = 15;
+	*pos++ = ttl;
+	*pos++ = 0;
+
+	memcpy(pos, target, ETH_ALEN);
+	pos += ETH_ALEN;
+	put_unaligned_le32(target_sn, pos);
+	pos += 4;
+	put_unaligned_le16(target_rcode, pos);
+
+	/* TODO: next_perr timer */
+	skb_reset_mac_header(skb);
+
+	ak60211_pkt_hex_dump(skb, "ak60211_mpath_sel_frame_tx", 0);
+	br_hmc_forward(skb, plc);
+
+	return true;
 }
 
 int ak60211_mpath_sel_frame_tx(enum ak60211_mpath_frame_type action, u8 flags,
@@ -313,7 +368,7 @@ int ak60211_mpath_sel_frame_tx(enum ak60211_mpath_frame_type action, u8 flags,
 
 	memcpy(plcpkts->plchdr.machdr.h_addr1, da, ETH_ALEN);
 	memcpy(plcpkts->plchdr.machdr.h_addr2, sa, ETH_ALEN);
-	memcpy(plcpkts->plchdr.machdr.h_addr3, target, ETH_ALEN);
+	memcpy(plcpkts->plchdr.machdr.h_addr3, da, ETH_ALEN);
 	memcpy(plcpkts->plchdr.machdr.h_addr4, sa, ETH_ALEN);
 
 	plcpkts->un.preq.category = WLAN_CATEGORY_MESH_ACTION;
@@ -436,7 +491,7 @@ int ak60211_rx_handler(struct sk_buff *pskb)
 	plcbuff = (struct plc_packet_union *)skb_mac_header(skb);
 
 	if (!is_valid_ether_addr(plcbuff->sa)) {
-		// not muitlcast or zero ether addr
+		/* not muitlcast or zero ether addr */
 		goto drop;
 	}
 
@@ -450,7 +505,6 @@ int ak60211_rx_handler(struct sk_buff *pskb)
 		goto drop;
 	}
 
-	//plc_info("eth type = %x\n", htons(plcbuff->ethtype));
 	if (htons(plcbuff->ethtype) != 0xAA55)
 		goto drop;
 
@@ -644,7 +698,6 @@ void ak60211_mpath_queue_preq(const u8 *dst, u32 hmc_sn)
 
 static void ak60211_mesh_housekeeping(struct ak60211_if_data *ifmsh)
 {
-	//PLC_TRACE();
 	if (ifmsh->mshcfg.plink_timeout > 0)
 		ak60211_sta_expire(ifmsh, ifmsh->mshcfg.plink_timeout * HZ);
 
@@ -662,8 +715,8 @@ void ak60211_iface_work(struct work_struct *work)
 	if (!ifmsh->mesh_id_len)
 		goto out;
 
-	if (ifmsh->preq_queue_len && time_after(jiffies,
-	    ifmsh->last_preq + msecs_to_jiffies(ifmsh->mshcfg.MeshHWMPpreqMinInterval)))
+	if (ifmsh->preq_queue_len &&
+	    time_after(jiffies, ifmsh->last_preq + msecs_to_jiffies(ifmsh->mshcfg.MeshHWMPpreqMinInterval)))
 		ak60211_mpath_start_discovery(ifmsh);
 
 	if (test_and_clear_bit(AK60211_MESH_WORK_HOUSEKEEPING, &ifmsh->wrkq_flags))

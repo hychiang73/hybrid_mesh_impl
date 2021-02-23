@@ -280,6 +280,50 @@ static u32 ak60211_hwmp_route_info_get(struct ak60211_if_data *ifmsh,
 	return process ? new_metric : 0;
 }
 
+static void ak60211_hwmp_perr_frame_process(struct ak60211_if_data *ifmsh,
+					    struct plc_packet_union *buff)
+{
+	struct ak60211_mesh_path *mpath;
+	u8 ttl;
+	const u8 *ta, *target_addr;
+	u32 target_sn;
+	u16 target_rcode;
+
+	ta = buff->plchdr.machdr.h_addr3;
+	ttl = buff->un.perr.elem.ttl;
+	if (ttl <= 1)
+		return;
+
+	ttl--;
+	target_addr = buff->un.perr.elem.h_targetaddr;
+	target_sn = buff->un.perr.elem.target_sn;
+	target_rcode = buff->un.perr.elem.target_rcode;
+
+	mpath = ak60211_mpath_lookup(ifmsh, target_addr);
+	if (mpath) {
+		struct ak60211_sta_info *sta;
+
+		spin_lock_bh(&mpath->state_lock);
+		sta = ak60211_next_hop_deref_protected(mpath);
+		if (mpath->flags & PLC_MESH_PATH_ACTIVE &&
+		    ether_addr_equal(ta, sta->addr) &&
+		    (!(mpath->flags & PLC_MESH_PATH_SN_VALID) ||
+		     SN_GT(target_sn, mpath->sn) || target_sn == 0)) {
+			mpath->flags &= ~PLC_MESH_PATH_ACTIVE;
+			if (target_sn != 0)
+				mpath->sn = target_sn;
+			else
+				mpath->sn += 1;
+			spin_unlock_bh(&mpath->state_lock);
+			ak60211_mpath_error_tx(ifmsh, ttl, target_addr,
+					       target_sn, target_rcode,
+					       broadcast_addr);
+		} else {
+			spin_unlock_bh(&mpath->state_lock);
+		}
+	}
+}
+
 static void ak60211_hwmp_prep_frame_process(struct ak60211_if_data *ifmsh,
 					    struct plc_packet_union *buff,
 					    u32 metric)
@@ -463,6 +507,14 @@ void ak60211_mesh_rx_path_sel_frame(struct ak60211_if_data *ifmsh,
 		if (path_metric)
 			ak60211_hwmp_prep_frame_process(ifmsh, buff, path_metric);
 
+		break;
+	case WLAN_EID_PERR:
+		if (buff->un.perr.elem.len != 15) {
+			plc_err("perr elem len is not 15\n");
+			return;
+		}
+
+		ak60211_hwmp_perr_frame_process(ifmsh, buff);
 		break;
 	default:
 		plc_err("tag not found\n");
@@ -925,7 +977,7 @@ void ak60211_mesh_rx_plink_frame(struct ak60211_if_data *ifmsh,
 
 	sta = mesh_info(ifmsh, buff->plchdr.machdr.h_addr4);
 
-	// TODO: check rssi threshold
+	/* TODO: check rssi threshold */
 	event = ak60211_plink_get_event(ifmsh, ftype, plid, llid, buff, sta);
 
 	if (event == OPN_ACPT) {
