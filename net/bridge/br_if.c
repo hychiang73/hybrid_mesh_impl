@@ -27,7 +27,6 @@
 #include <net/switchdev.h>
 
 #include "br_private.h"
-#include "br_hmc.h"
 
 /*
  * Determine initial path cost based on speed.

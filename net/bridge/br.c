@@ -22,7 +22,6 @@
 #include <net/switchdev.h>
 
 #include "br_private.h"
-#include "br_hmc.h"
 
 /*
  * Handle changes in state of network devices enslaved to a bridge.
