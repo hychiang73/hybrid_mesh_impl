@@ -323,7 +323,7 @@ int ak60211_mpath_error_tx(struct ak60211_if_data *ifmsh, u8 ttl,
 	skb_reset_mac_header(skb);
 
 	ak60211_pkt_hex_dump(skb, "ak60211_mpath_sel_frame_tx", 0);
-	br_hmc_forward(skb, plc);
+	hmc_xmit(skb, HMC_PORT_PLC);
 
 	return true;
 }
