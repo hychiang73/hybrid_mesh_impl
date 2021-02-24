@@ -41,6 +41,11 @@ static u32 fdb_salt __read_mostly;
 
 struct hmc_core *hmc = NULL;
 
+struct hmc_core *hmc_to_core(void)
+{
+	return hmc;
+}
+
 static inline int hmc_mac_hash(const u8 *mac, u16 iface_id)
 {
 	u32 key = get_unaligned((u32 *)(mac + 2));

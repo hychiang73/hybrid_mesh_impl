@@ -97,6 +97,7 @@ struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr);
 int hmc_fdb_dump(struct nl60211_mesh_info *info, int size);
 int hmc_fdb_del(const u8 *addr, u16 iface_id);
 
+struct hmc_core *hmc_to_core(void);
 int hmc_get_dev_addr(u8 *addr);
 int hmc_xmit(struct sk_buff *skb, enum hmc_port_egress egress);
 
