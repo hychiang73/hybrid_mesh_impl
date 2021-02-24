@@ -325,7 +325,7 @@ void ak60211_mpath_timer(struct timer_list *t)
 		//plc->path->metric = MAX_METRIC;
 		//plc_debug("mpath discovery retry max, stop send preq\n");
 		//br_hmc_path_update(plc);
-		//spin_unlock_bh(&mpath->state_lock);
+		spin_unlock_bh(&mpath->state_lock);
 	}
 }
 
