@@ -816,7 +816,7 @@ int do_addmpath(int argc, char **argv)
 		printf("Error: not a decimal string!\n");
 		exit(-1);
 	}
-	req->iface_id= (uint16_t)temp;
+	req->iface_id = (uint16_t)temp;
 
 	if_nl_send(
 		NL60211_ADD_MPATH,
@@ -860,7 +860,7 @@ int do_delmpath(int argc, char **argv)
 		printf("Error: not a decimal string!\n");
 		exit(-1);
 	}
-	req->iface_id= (uint16_t)temp;
+	req->iface_id = (uint16_t)temp;
 
 	if_nl_send(
 		NL60211_DEL_MPATH,
@@ -909,7 +909,7 @@ int do_getmpath(int argc, char **argv)
 		printf("Error: not a decimal string!\n");
 		exit(-1);
 	}
-	req->iface_id= (uint16_t)temp;
+	req->iface_id = (uint16_t)temp;
 
 	if_nl_send(
 		NL60211_GET_MPATH,
@@ -924,7 +924,7 @@ int do_getmpath(int argc, char **argv)
 	printf("return_code = %d\n", res->return_code);
 	if (res->return_code == 0) {
 		printf("%-21s %-10s %-10s %-10s %-10s\n",
-		       "DA", "SN", "METRIC", "FLAG","IFACE_ID");
+		       "DA", "SN", "METRIC", "FLAG", "IFACE_ID");
 		printf("%02X:%02X:%02X:%02X:%02X:%02X     ",
 		       res->da[0], res->da[1], res->da[2],
 		       res->da[3], res->da[4], res->da[5]);

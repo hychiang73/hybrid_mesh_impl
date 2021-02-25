@@ -234,7 +234,7 @@ void test_hmc_gen_pkt_snap(
 	u8 da[ETH_ALEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 	u8 sa[ETH_ALEN] = {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff};
 	u8 *pos;
-	int egress = -1;;
+	int egress = -1;
 
 	for (i = 0; i < total_len; i++) {
 		if (i < 6) {
@@ -839,8 +839,7 @@ static void nl60211_cmd_dumpmpath(struct nl60211msg *nlreq)
 		if (do_final_msg == 0) {
 			if (i >= HMC_MAX_NODES) {
 				do_final_msg = 1;
-			}
-			else {
+			} else {
 				if (info[i].iface_id == 0) {
 					i++;
 					continue;
@@ -867,8 +866,7 @@ static void nl60211_cmd_dumpmpath(struct nl60211msg *nlreq)
 		res = (struct nl60211_dumpmpath_res *)nlres->buf;
 		if (do_final_msg) {
 			res->return_code = -1;
-		}
-		else {
+		} else {
 			res->return_code = 0;
 			memcpy(res->da, info[i].dst, ETH_ALEN);
 			res->iface_id = info[i].iface_id;
@@ -888,8 +886,7 @@ static void nl60211_cmd_dumpmpath(struct nl60211msg *nlreq)
 
 		if (do_final_msg)
 			break;
-		else
-			i++;
+		i++;
 	}
 }
 
