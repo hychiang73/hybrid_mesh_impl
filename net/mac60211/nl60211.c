@@ -309,13 +309,14 @@ void test_hmc_gen_pkt_snap(
 #endif
 }
 
+#define PID_OF_SENDER  nlreq->nl_msghdr.nlmsg_pid
+#define IF_INDEX       nlreq->if_index
+#define COMMAND_TYPE   nlreq->nl_msghdr.nlmsg_type
+
 static struct sock *nl_sk;
 static int pr_debug_en;
-static int pid_of_sender;
 static int pid_of_receiver;
-static unsigned int if_index;
 static unsigned int if_index_recv;
-static unsigned int command_type;
 static unsigned int command_type_recv;
 static unsigned int is_nl60211_in_recv;
 static unsigned int is_nl60211_in_recv_once;
@@ -349,7 +350,7 @@ static void nl60211_cmd_simple_response(
 	nlres->if_index = nlreq->if_index;
 	memcpy(nlres->buf, payload, payload_len);
 	//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
-	ret = nlmsg_unicast(nl_sk, skbres, pid_of_sender);
+	ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
 	if (ret < 0)
 		pr_info("Error while sending back to user\n");
 }
@@ -358,10 +359,10 @@ static void nl60211_cmd_debug_dump(struct nl60211msg *nlreq)
 {
 	pr_warn("====== SNAP DUMP ======\n");
 	pr_warn("pr_debug_en = %d\n", pr_debug_en);
-	pr_warn("pid_of_sender = %d\n", pid_of_sender);
+	pr_warn("pid_of_sender = %d\n", PID_OF_SENDER);
 	pr_warn("pid_of_receiver = %d\n", pid_of_receiver);
-	pr_warn("if_index = %u\n", if_index);
-	pr_warn("command_type = 0x%04X\n", command_type);
+	pr_warn("if_index = %u\n", IF_INDEX);
+	pr_warn("command_type = 0x%04X\n", COMMAND_TYPE);
 	pr_warn("is_nl60211_in_recv = %u\n", is_nl60211_in_recv);
 	pr_warn("is_nl60211_in_recv_once = %u\n", is_nl60211_in_recv_once);
 	pr_warn("recv_ether_type[0] = %u\n", recv_ether_type[0]);
@@ -467,7 +468,7 @@ static void nl60211_cmd_getmeshid(struct nl60211msg *nlreq)
 	res->id[id_len] = 0; /* char: \'0 , for C string. */
 
 	//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
-	ret = nlmsg_unicast(nl_sk, skbres, pid_of_sender);
+	ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
 
 	if (ret < 0)
 		pr_info("Error while sending back to user\n");
@@ -509,7 +510,7 @@ static void nl60211_cmd_recv(struct nl60211msg *nlreq)
 	recv_ether_type[0] = req->ether_type[0];
 	recv_ether_type[1] = req->ether_type[1];
 	is_nl60211_in_recv = 1;
-	pid_of_receiver = pid_of_sender;
+	pid_of_receiver = PID_OF_SENDER;
 
 	pr_info("%s() start ...\n", __func__);
 
@@ -529,7 +530,7 @@ static void nl60211_cmd_recv_once(struct nl60211msg *nlreq)
 	recv_ether_type[0] = req->ether_type[0];
 	recv_ether_type[1] = req->ether_type[1];
 	is_nl60211_in_recv_once = 1;
-	pid_of_receiver = pid_of_sender;
+	pid_of_receiver = PID_OF_SENDER;
 
 	pr_info("%s() start ...\n", __func__);
 
@@ -709,7 +710,7 @@ static void nl60211_cmd_getsa(struct nl60211msg *nlreq)
 	memcpy(res->sa, local_addr, 6);
 
 	//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
-	ret = nlmsg_unicast(nl_sk, skbres, pid_of_sender);
+	ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
 
 	if (ret < 0)
 		pr_info("Error while sending back to user\n");
@@ -811,7 +812,7 @@ static void nl60211_cmd_getmpath(struct nl60211msg *nlreq)
 	}
 
 	//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
-	ret = nlmsg_unicast(nl_sk, skbres, pid_of_sender);
+	ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
 
 	if (ret < 0)
 		pr_info("Error while sending back to user\n");
@@ -877,7 +878,7 @@ static void nl60211_cmd_dumpmpath(struct nl60211msg *nlreq)
 		}
 
 		//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
-		ret = nlmsg_unicast(nl_sk, skbres, pid_of_sender);
+		ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
 
 		if (ret < 0) {
 			pr_info("Error while sending back to user\n");
@@ -1005,9 +1006,6 @@ static void nl60211_netlink_input(struct sk_buff *skb_in)
 		pr_info("if_index     = %d\n", nlreq->if_index);
 	}
 
-	pid_of_sender = nlreq->nl_msghdr.nlmsg_pid;
-	if_index = nlreq->if_index;
-	command_type = nlreq->nl_msghdr.nlmsg_type;
 	switch (nlh->nlmsg_type & 0x00FF) {
 	case NL60211_DEBUG:
 		nl60211_cmd_debug(nlreq);
@@ -1019,13 +1017,13 @@ static void nl60211_netlink_input(struct sk_buff *skb_in)
 		nl60211_cmd_setmeshid(nlreq);
 		break;
 	case NL60211_RECV:
-		if_index_recv = if_index;
-		command_type_recv = command_type;
+		if_index_recv = IF_INDEX;
+		command_type_recv = COMMAND_TYPE;
 		nl60211_cmd_recv(nlreq);
 		break;
 	case NL60211_RECV_ONCE:
-		if_index_recv = if_index;
-		command_type_recv = command_type;
+		if_index_recv = IF_INDEX;
+		command_type_recv = COMMAND_TYPE;
 		nl60211_cmd_recv_once(nlreq);
 		break;
 	case NL60211_RECV_CANCEL:
@@ -1062,7 +1060,7 @@ static void nl60211_netlink_input(struct sk_buff *skb_in)
 		nl60211_cmd_dumpmpath(nlreq);
 		break;
 	default:
-		pr_warn("[SNAP] Unknown command = %d\n", nlh->nlmsg_type);
+		pr_warn("[NL60211] Unknown command = %d\n", nlh->nlmsg_type);
 	}
 }
 
