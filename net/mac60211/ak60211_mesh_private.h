@@ -454,6 +454,7 @@ struct plc_packet_union {
 		struct prep_pkts	prep;
 		struct perr_pkts	perr;
 		struct self_prot	self;
+		u8 data[1520-14];
 	} un;
 };
 
@@ -479,6 +480,14 @@ static inline void ak60211_mesh_plink_fsm_restart(struct ak60211_sta_info *sta)
 	sta->llid = 0;
 	/* sta->llid = sta->plid = sta->reason = 0; */
 }
+
+static inline struct ak60211_sta_info *
+ak60211_next_hop_deref_protected(struct ak60211_mesh_path *mpath)
+{
+	return rcu_dereference_protected(mpath->next_hop,
+					 lockdep_is_held(&mpath->state_lock));
+}
+
 extern struct net_bridge_hmc *plc;
 extern bool plc_dbg;
 
@@ -520,15 +529,13 @@ int ak60211_mpath_sel_frame_tx(enum ak60211_mpath_frame_type action,
 			       u8 hop_count, u8 ttl, u32 lifetime, u32 metric,
 			       u32 preq_id, struct ak60211_if_data *ifmsh);
 
-void __ak60211_mpath_queue_preq(struct ak60211_if_data *ifmsh,
-				const u8 *dst, u32 hmc_sn);
 void plc_send_beacon(void);
 void ak60211_preq_test_wq(struct work_struct *work);
 //void ak60211_mpath_queue_preq_new(struct hmc_hybrid_path *hmpath);
 //int __ak60211_mpath_queue_preq_new(struct ak60211_if_data *ifmsh,
 //				   struct hmc_hybrid_path *hmpath, u8 flags);
-int ak60211_mpath_queue_preq_new(const u8 *addr);
-int __ak60211_mpath_queue_preq_new(struct ak60211_if_data *ifmsh,
+int ak60211_mpath_queue_preq(const u8 *addr);
+int __ak60211_mpath_queue_preq(struct ak60211_if_data *ifmsh,
 									const u8 *dst, u8 flags);
 struct ak60211_if_data *ak60211_dev_to_ifdata(void);
 

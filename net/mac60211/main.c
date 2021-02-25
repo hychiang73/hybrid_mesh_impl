@@ -30,7 +30,7 @@ EXPORT_SYMBOL(plc_hmc_rx);
 int plc_hmc_preq_queue(const u8 *addr)
 {
 	pr_info("%s\n", __func__);
-	return ak60211_mpath_queue_preq_new(addr);
+	return ak60211_mpath_queue_preq(addr);
 }
 EXPORT_SYMBOL(plc_hmc_preq_queue);
 
@@ -93,9 +93,7 @@ static ssize_t plc_proc_test_write(struct file *pfile, const char *ubuf,
 {
 #define MAX_BUF_WMAX	20
 	static bool sbeacon_flag;
-	static u32 hmc_sn;
 	char buf[MAX_BUF_WMAX];
-	u8 jetson2[ETH_ALEN] = {0x00, 0x04, 0x4b, 0xe6, 0xec, 0x3d};
 
 	if (*pos > 0 || size > MAX_BUF_WMAX)
 		return -EFAULT;
@@ -103,20 +101,13 @@ static ssize_t plc_proc_test_write(struct file *pfile, const char *ubuf,
 	if (copy_from_user(buf, ubuf, size))
 		return -EFAULT;
 
-	// beacon start
+	/* beacon start */
 	if (!memcmp(buf, "beacon", size - 1)) {
 		sbeacon_flag = !sbeacon_flag;
 		if (!sbeacon_flag)
 			sbeacon_wq_init();
 		else
 			sbeacon_wq_deinit();
-	}
-
-	if (!memcmp(buf, "preq", size - 1)) {
-		// ak60211_mpath_queue_preq(jetson2, ++hmc_sn);
-		//memcpy(plc->path->dst, jetson2, ETH_ALEN);
-		//plc->path->sn = ++hmc_sn;
-		//ak60211_mpath_queue_preq_ops(plc);
 	}
 
 	if (!memcmp(buf, "debug", size - 1)) {

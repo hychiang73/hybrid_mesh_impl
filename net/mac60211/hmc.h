@@ -109,4 +109,7 @@ void hmc_print_skb(struct sk_buff *skb, const char *type);
 int hmc_misc_init(void);
 void hmc_misc_exit(void);
 
+/* ak60211 function */
+void ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id);
+
 #endif /* _HMC_H */

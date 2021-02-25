@@ -20,39 +20,7 @@ static inline u32 ak60211_mplink_free_count(struct ak60211_if_data *ifmsh)
 	return ifmsh->mshcfg.MeshMaxPeerLinks - atomic_read(&ifmsh->estab_plinks);
 }
 
-void __ak60211_mpath_queue_preq(struct ak60211_if_data *ifmsh,
-				const u8 *dst, u32 hmc_sn)
-{
-	struct ak60211_mesh_path *mpath;
-	u32 lifetime;
-	u8 ttl;
-
-	mpath = ak60211_mpath_lookup(ifmsh, dst);
-	if (!mpath) {
-		mpath = ak60211_mpath_add(ifmsh, dst);
-		if (!mpath) {
-			plc_err("mpath build up fail\n");
-			return;
-		}
-	}
-
-	ifmsh->sn = hmc_sn;
-	ttl = MAX_MESH_TTL;
-	lifetime = MSEC_TO_TU(AK60211_MESH_HWMP_PATH_TIMEOUT);
-	ak60211_mpath_sel_frame_tx(AK60211_MPATH_PREQ, mpath->flags,
-				   ifmsh->addr, ifmsh->sn, mpath->dst,
-				   mpath->sn, broadcast_addr, 0, ttl,
-				   lifetime, 0, ++ifmsh->preq_id, ifmsh);
-}
-
-static inline struct ak60211_sta_info *
-ak60211_next_hop_deref_protected(struct ak60211_mesh_path *mpath)
-{
-	return rcu_dereference_protected(mpath->next_hop,
-					 lockdep_is_held(&mpath->state_lock));
-}
-
-int __ak60211_mpath_queue_preq_new(struct ak60211_if_data *ifmsh,
+int __ak60211_mpath_queue_preq(struct ak60211_if_data *ifmsh,
 				   const u8 *dst,
 				   u8 flags)
 {

@@ -313,7 +313,7 @@ void ak60211_mpath_timer(struct timer_list *t)
 		mpath->flags &= ~PLC_MESH_PATH_REQ_QUEUED;
 		spin_unlock_bh(&mpath->state_lock);
 		//__ak60211_mpath_queue_preq_new(ifmsh, &hmpath, 0);
-		__ak60211_mpath_queue_preq_new(ifmsh, mpath->dst, 0);
+		__ak60211_mpath_queue_preq(ifmsh, mpath->dst, 0);
 	} else {
 		mpath->flags &= ~(PLC_MESH_PATH_RESOLVING |
 				  PLC_MESH_PATH_RESOLVED | PLC_MESH_PATH_REQ_QUEUED);
