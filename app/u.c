@@ -153,19 +153,21 @@ struct nl60211_setmpath_res {
 struct nl60211_getmpath_res {
 	s32    return_code;
 	u8     da[ETH_ALEN];
+	u16    iface_id;
 	u32    sn;
 	u32    metric;
 	u32    flags;
-	u32    egress;
+	unsigned long exp_time;
 };
 
 struct nl60211_dumpmpath_res {
 	s32    return_code;
 	u8     da[ETH_ALEN];
+	u16    iface_id;
 	u32    sn;
 	u32    metric;
 	u32    flags;
-	u32    egress;
+	unsigned long exp_time;
 };
 
 // request
@@ -230,10 +232,12 @@ struct nl60211_getsa_req {
 
 struct nl60211_addmpath_req {
 	u8     da[ETH_ALEN];
+	u16    iface_id;
 };
 
 struct nl60211_delmpath_req {
 	u8     da[ETH_ALEN];
+	u16    iface_id;
 };
 
 struct nl60211_setmpath_req {
@@ -241,6 +245,7 @@ struct nl60211_setmpath_req {
 
 struct nl60211_getmpath_req {
 	u8     da[ETH_ALEN];
+	u16    iface_id;
 };
 
 struct nl60211_dumpmpath_req {
@@ -796,8 +801,8 @@ int do_addmpath(int argc, char **argv)
 	printf("argc = %d, if_idx = %d\n", argc, if_idx);
 	argc--;
 	argv++;
-	if (argc != ETH_ALEN)
-		printf("Error: Must input %d bytes da!", ETH_ALEN);
+	if (argc != ETH_ALEN+1)
+		printf("Error: Must input %d bytes da!", ETH_ALEN+1);
 
 	req = (struct nl60211_addmpath_req *)sk_msg_send.nl_msg.buf;
 	for (i = 0; i < ETH_ALEN; i++) {
@@ -807,6 +812,11 @@ int do_addmpath(int argc, char **argv)
 		}
 		req->da[i] = (uint8_t)temp;
 	}
+	if (sscanf(argv[i], "%d", &temp) == 0) {
+		printf("Error: not a decimal string!\n");
+		exit(-1);
+	}
+	req->iface_id= (uint16_t)temp;
 
 	if_nl_send(
 		NL60211_ADD_MPATH,
@@ -835,8 +845,8 @@ int do_delmpath(int argc, char **argv)
 	printf("argc = %d, if_idx = %d\n", argc, if_idx);
 	argc--;
 	argv++;
-	if (argc != ETH_ALEN)
-		printf("Error: Must input %d bytes da!", ETH_ALEN);
+	if (argc != ETH_ALEN+1)
+		printf("Error: Must input %d bytes da!", ETH_ALEN+1);
 
 	req = (struct nl60211_delmpath_req *)sk_msg_send.nl_msg.buf;
 	for (i = 0; i < ETH_ALEN; i++) {
@@ -846,6 +856,11 @@ int do_delmpath(int argc, char **argv)
 		}
 		req->da[i] = (uint8_t)temp;
 	}
+	if (sscanf(argv[i], "%d", &temp) == 0) {
+		printf("Error: not a decimal string!\n");
+		exit(-1);
+	}
+	req->iface_id= (uint16_t)temp;
 
 	if_nl_send(
 		NL60211_DEL_MPATH,
@@ -879,8 +894,8 @@ int do_getmpath(int argc, char **argv)
 	printf("argc = %d, if_idx = %d\n", argc, if_idx);
 	argc--;
 	argv++;
-	if (argc != ETH_ALEN)
-		printf("Error: Must input %d bytes da!", ETH_ALEN);
+	if (argc != ETH_ALEN+1)
+		printf("Error: Must input %d bytes da!", ETH_ALEN+1);
 
 	req = (struct nl60211_getmpath_req *)sk_msg_send.nl_msg.buf;
 	for (i = 0; i < ETH_ALEN; i++) {
@@ -890,6 +905,11 @@ int do_getmpath(int argc, char **argv)
 		}
 		req->da[i] = (uint8_t)temp;
 	}
+	if (sscanf(argv[i], "%d", &temp) == 0) {
+		printf("Error: not a decimal string!\n");
+		exit(-1);
+	}
+	req->iface_id= (uint16_t)temp;
 
 	if_nl_send(
 		NL60211_GET_MPATH,
@@ -904,12 +924,12 @@ int do_getmpath(int argc, char **argv)
 	printf("return_code = %d\n", res->return_code);
 	if (res->return_code == 0) {
 		printf("%-21s %-10s %-10s %-10s %-10s\n",
-		       "DA", "SN", "METRIC", "FLAG", "EGRESS");
+		       "DA", "SN", "METRIC", "FLAG","IFACE_ID");
 		printf("%02X:%02X:%02X:%02X:%02X:%02X     ",
 		       res->da[0], res->da[1], res->da[2],
 		       res->da[3], res->da[4], res->da[5]);
 		printf("%-10d %-10d %-10d %-10d\n",
-		       res->sn, res->metric, res->flags, res->egress);
+		       res->sn, res->metric, res->flags, res->iface_id);
 	}
 	return 0;
 }
@@ -926,7 +946,7 @@ int do_dumpmpath(int argc, char **argv)
 
 	if_nl_send(NL60211_DUMP_MPATH, if_idx, 0);
 	printf("%-21s %-10s %-10s %-10s %-10s\n",
-	       "DA", "SN", "METRIC", "FLAG", "EGRESS");
+	       "DA", "SN", "METRIC", "FLAG", "IFACE_ID");
 
 	while (1) {
 		if_nl_recv();
@@ -940,8 +960,8 @@ int do_dumpmpath(int argc, char **argv)
 		printf("%02X:%02X:%02X:%02X:%02X:%02X     ",
 		       res->da[0], res->da[1], res->da[2],
 		       res->da[3], res->da[4], res->da[5]);
-		printf("%-10d %-10d 0x%-8X %-10d\n",
-		       res->sn, res->metric, res->flags, res->egress);
+		printf("%-10d %-10d %-10d %-10d\n",
+		       res->sn, res->metric, res->flags, res->iface_id);
 	}
 	return 0;
 }

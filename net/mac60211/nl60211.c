@@ -108,19 +108,21 @@ struct nl60211_setmpath_res {
 struct nl60211_getmpath_res {
 	s32    return_code;
 	u8     da[ETH_ALEN];
+	u16    iface_id;
 	u32    sn;
 	u32    metric;
 	u32    flags;
-	u32    egress;
+	unsigned long exp_time;
 };
 
 struct nl60211_dumpmpath_res {
 	s32    return_code;
 	u8     da[ETH_ALEN];
+	u16    iface_id;
 	u32    sn;
 	u32    metric;
 	u32    flags;
-	u32    egress;
+	unsigned long exp_time;
 };
 
 // request
@@ -185,10 +187,12 @@ struct nl60211_getsa_req {
 
 struct nl60211_addmpath_req {
 	u8     da[ETH_ALEN];
+	u16    iface_id;
 };
 
 struct nl60211_delmpath_req {
 	u8     da[ETH_ALEN];
+	u16    iface_id;
 };
 
 struct nl60211_setmpath_req {
@@ -196,6 +200,7 @@ struct nl60211_setmpath_req {
 
 struct nl60211_getmpath_req {
 	u8     da[ETH_ALEN];
+	u16    iface_id;
 };
 
 struct nl60211_dumpmpath_req {
@@ -431,7 +436,7 @@ static void nl60211_cmd_getmeshid(struct nl60211msg *nlreq)
 	int ret;
 	//local
 	//temp
-	char id[] = "mymesh222";
+	char id[] = "mymesh333";
 	unsigned int id_len = strlen(id);
 
 	//response
@@ -715,18 +720,22 @@ static void nl60211_cmd_addmpath(struct nl60211msg *nlreq)
 	//request
 	struct nl60211_addmpath_req *req =
 		(struct nl60211_addmpath_req *)nlreq->buf;
-	//struct hmc_path *mpath = br_hmc_path_add(req->da);
+	struct hmc_fdb_entry *f = hmc_fdb_insert(req->da, req->iface_id);
 	//response
-	//struct sk_buff *skbres;
-	//struct nl60211msg *nlres;
-	//struct nl60211_setmeshid_res *res;
-	//u32 nlmsgsize;
 	struct nl60211_addmpath_res simpleres;
 	s32 return_code = 0;
 
 	//response
-	//if (IS_ERR(mpath))
-	//	return_code = (s32)PTR_ERR(mpath);
+	if (CHECK_MEM(f)) {
+		return_code = 1;
+		pr_err("req->iface_id = %d\n", req->iface_id);
+		pr_err("req->da[0] = 0x%02X\n", req->da[0]);
+		pr_err("req->da[1] = 0x%02X\n", req->da[1]);
+		pr_err("req->da[2] = 0x%02X\n", req->da[2]);
+		pr_err("req->da[3] = 0x%02X\n", req->da[3]);
+		pr_err("req->da[4] = 0x%02X\n", req->da[4]);
+		pr_err("req->da[5] = 0x%02X\n", req->da[5]);
+	}
 
 	simpleres.return_code = return_code;
 	nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
@@ -738,18 +747,13 @@ static void nl60211_cmd_delmpath(struct nl60211msg *nlreq)
 	//request
 	struct nl60211_delmpath_req *req =
 		(struct nl60211_delmpath_req *)nlreq->buf;
-	//int ret = br_hmc_path_del(req->da);
-	int ret = 0;
+	int ret = hmc_fdb_del(req->da, req->iface_id);
 	//response
 	//struct sk_buff *skbres;
 	//struct nl60211msg *nlres;
 	//struct nl60211_setmeshid_res *res;
 	//u32 nlmsgsize;
 	struct nl60211_delmpath_res simpleres;
-
-	if (hmc_fdb_del(req->da, HMC_PORT_PLC) < 0 ||
-		hmc_fdb_del(req->da, HMC_PORT_WIFI) < 0)
-		pr_info("Not found dest or port from table\n");
 
 	simpleres.return_code = (s32)ret;
 	nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
@@ -765,8 +769,7 @@ static void nl60211_cmd_getmpath(struct nl60211msg *nlreq)
 	//request
 	struct nl60211_getmpath_req *req =
 		(struct nl60211_getmpath_req *)nlreq->buf;
-	//struct hmc_path *mpath = br_hmc_path_lookup(req->da);
-	struct hmc_fdb_entry *mpath = NULL; //add lookup
+	struct hmc_fdb_entry *f = hmc_fdb_lookup(req->da, req->iface_id);
 	//response
 	struct sk_buff *skbres;
 	struct nl60211msg *nlres;
@@ -795,19 +798,16 @@ static void nl60211_cmd_getmpath(struct nl60211msg *nlreq)
 	nlres->if_index = nlreq->if_index;
 
 	res = (struct nl60211_getmpath_res *)nlres->buf;
-	if (IS_ERR(mpath)) {
-		res->return_code = (s32)PTR_ERR(mpath);
+	if (f) {
+		res->return_code = 0;
+		memcpy(res->da, f->addr, ETH_ALEN);
+		res->iface_id = f->iface_id;
+		res->sn = f->sn;
+		res->metric = f->metric;
+		res->flags = (u32)f->flags;
+		res->exp_time = f->exp_time;
 	} else {
-		if (!mpath) {
-			res->return_code = -1;
-		} else {
-			res->return_code = 0;
-			res->sn = mpath->sn;
-			res->metric = mpath->metric;
-			res->flags = (u32)mpath->flags;
-			res->egress = (u32)mpath->iface_id;
-			memcpy(res->da, mpath->addr, ETH_ALEN);
-		}
+		res->return_code = -1;
 	}
 
 	//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
@@ -819,31 +819,38 @@ static void nl60211_cmd_getmpath(struct nl60211msg *nlreq)
 
 static void nl60211_cmd_dumpmpath(struct nl60211msg *nlreq)
 {
-	//struct hmc_path *br_hmc_path_lookup(const u8 *dst)
 	//request
-	struct nl60211_mesh_info info;
+	struct nl60211_mesh_info info[HMC_MAX_NODES] = {0};
 	//response
 	struct sk_buff *skbres;
 	struct nl60211msg *nlres;
 	struct nl60211_dumpmpath_res *res;
 	u32 nlmsgsize, i = 0;
-	int ret, ret_lookup;
+	int ret, do_final_msg = 0;
 
+	if (hmc_fdb_dump(info, HMC_MAX_NODES) < 0) {
+		pr_err("info size is overflow\n");
+		do_final_msg = 1;
+	}
+	//response
+	if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
+		return;
 	while (1) {
-		//ret_lookup = br_hmc_path_lookup_by_idx(&info, i);
-		//if (ret_lookup < 0) {
-			//br_hmc_err("No path dummped.\n");
-			//return;
-		//}
-		i++;
+		if (do_final_msg == 0) {
+			if (i >= HMC_MAX_NODES) {
+				do_final_msg = 1;
+			}
+			else {
+				if (info[i].iface_id == 0) {
+					i++;
+					continue;
+				}
+			}
+		}
 
-		//response
-		if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
-			return;
 		nlmsgsize = sizeof(struct nl60211msg) - sizeof(nlres->buf) +
 			    sizeof(struct nl60211_dumpmpath_res);
 		skbres = nlmsg_new(nlmsgsize, GFP_ATOMIC);
-
 		if (!skbres) {
 			pr_err("Failed to allocate new skb\n");
 			return;
@@ -858,12 +865,18 @@ static void nl60211_cmd_dumpmpath(struct nl60211msg *nlreq)
 		nlres->if_index = nlreq->if_index;
 
 		res = (struct nl60211_dumpmpath_res *)nlres->buf;
-		res->return_code = ret_lookup;
-		res->sn = info.sn;
-		res->metric = info.metric;
-		res->flags = (u32)info.flags;
-		res->egress = (u32)info.iface_id;
-		memcpy(res->da, info.dst, ETH_ALEN);
+		if (do_final_msg) {
+			res->return_code = -1;
+		}
+		else {
+			res->return_code = 0;
+			memcpy(res->da, info[i].dst, ETH_ALEN);
+			res->iface_id = info[i].iface_id;
+			res->sn = info[i].sn;
+			res->metric = info[i].metric;
+			res->flags = (u32)info[i].flags;
+			//res->exp_time = info[i].exp_time;
+		}
 
 		//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
 		ret = nlmsg_unicast(nl_sk, skbres, pid_of_sender);
@@ -872,8 +885,11 @@ static void nl60211_cmd_dumpmpath(struct nl60211msg *nlreq)
 			pr_info("Error while sending back to user\n");
 			return;
 		}
-		if (ret_lookup < 0)
+
+		if (do_final_msg)
 			break;
+		else
+			i++;
 	}
 }
 
