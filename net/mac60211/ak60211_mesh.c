@@ -589,7 +589,7 @@ int ak60211_rx_handler(struct sk_buff *pskb, struct sk_buff *nskb)
 		goto drop;
 	}
 
-	if ((!!memcmp(plcbuff->da, plcdev.addr, ETH_ALEN)) &&
+	if (!(ether_addr_equal(plcbuff->da, plcdev.addr)) &&
 	    !is_broadcast_ether_addr(plcbuff->da))
 		goto drop;
 
