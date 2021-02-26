@@ -16,6 +16,8 @@
 #include "../mac80211/mesh.h"
 #include "../bridge/br_private.h"
 
+#define NF_NEW_PKTS	0x55
+
 #define HMC_SKB_QUEUE_LEN		5
 #define HMC_HASH_BITS			8
 #define HMC_MAX_NODES			16

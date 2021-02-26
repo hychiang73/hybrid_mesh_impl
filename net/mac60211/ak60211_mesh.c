@@ -322,7 +322,7 @@ int ak60211_mpath_error_tx(struct ak60211_if_data *ifmsh, u8 ttl,
 	/* TODO: next_perr timer */
 	skb_reset_mac_header(skb);
 
-	ak60211_pkt_hex_dump(skb, "ak60211_mpath_sel_frame_tx", 0);
+	ak60211_pkt_hex_dump(skb, "ak60211_mpath_error_tx", 0);
 	hmc_xmit(skb, HMC_PORT_PLC);
 
 	return true;
@@ -438,6 +438,43 @@ int ak60211_mpath_sel_frame_tx(enum ak60211_mpath_frame_type action, u8 flags,
 	return true;
 }
 
+void ak60211_plcto8023_unencap(struct ak60211_if_data *ifmsh, struct plc_packet_union *buff, struct sk_buff *skb, struct sk_buff *nskb)
+{
+	u32 pkt_size;
+
+	PLC_TRACE();
+
+	rmb();
+	pkt_size = skb->len - /* sizeof(struct ethhdr) */sizeof(struct plc_hdr);
+	plc_info("skb->len:%d, nskb->len:%d\n", skb->len, pkt_size);
+	nskb = netdev_alloc_skb(skb->dev, pkt_size);
+	if (!nskb)
+		return;
+
+	skb_copy_to_linear_data(nskb, &buff->un.data, pkt_size);
+	skb_put(nskb, pkt_size);
+	nskb->protocol = eth_type_trans(nskb, skb->dev);
+	nskb->len = pkt_size;
+	nskb->dev = skb->dev;
+
+	ak60211_pkt_hex_dump(skb, "ak60211_plcto8023_unencap(PLC)", 0);
+	ak60211_pkt_hex_dump(nskb, "ak60211_plcto8023_unencap(ETH)", 0);
+}
+
+
+int ak60211_mesh_data_handle(struct ak60211_if_data *ifmsh, struct plc_packet_union *buff, struct sk_buff *skb, struct sk_buff *nskb)
+{
+	PLC_TRACE();
+
+	if (ether_addr_equal(buff->plchdr.machdr.h_addr3, ifmsh->addr)) {
+		/* data is for us */
+		plc_info("pkts is for us, send to ip layer\n");
+		ak60211_plcto8023_unencap(ifmsh, buff, skb, nskb);
+	}
+
+	return NF_NEW_PKTS;
+}
+
 void ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 {
 	struct sk_buff *nskb;
@@ -445,21 +482,19 @@ void ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 	struct ak60211_mesh_path *mpath = NULL;
 	struct ak60211_if_data *ifmsh;
 	int hdr_len = sizeof(struct ethhdr) + sizeof(struct plc_hdr);
-	u8 dst[ETH_ALEN], src[ETH_ALEN], ethtype;
+	u8 dst[ETH_ALEN], src[ETH_ALEN];
+	__le16 ethtype;
 	u8 *pos, nexthop[ETH_ALEN];
 
 	PLC_TRACE();
 
-	//hmc_xmit(skb, iface_id);
-	//ifmsh = ak60211_dev_to_ifdata();
+	// hmc_xmit(skb, iface_id);
+	// return;
+	ifmsh = ak60211_dev_to_ifdata();
 	/* Get ethernet hdr */
-	//plc_info("---------------skb->len:%d--------------\n", skb->len);
-	return;
-	ak60211_pkt_hex_dump(skb, "ak60211_nexthop_resolved(ORI)", 0);
-
 	memcpy(&dst, skb->data, ETH_ALEN);
 	memcpy(&src, skb->data + ETH_ALEN, ETH_ALEN);
-	ethtype = ntohs(((struct ethhdr*)skb->data)->h_proto);
+	ethtype = ntohs(0xAA55);
 	mpath = ak60211_mpath_lookup(ifmsh, dst);
 	if (!mpath) {
 		/* TODO: if no this mpath, should i queue and preq? */
@@ -467,13 +502,12 @@ void ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 		return;
 	}
 
-	plc_info("dst:%2x:%2x:%2x:%2x:%2x:%2x\n", dst[0],dst[1],dst[2],dst[3],dst[4],dst[5]);
-	plc_info("dst:%2x:%2x:%2x:%2x:%2x:%2x\n", src[0],src[1],src[2],src[3],src[4],src[5]);
-	plc_info("ethtype:%x\n", ethtype);
-	plc_info("skb->len:%d\n", skb->len);
 	/* headroom + 802.3 data + tailroom */
-	nskb = dev_alloc_skb(2 + skb->len + 2);
 	hdr_len += skb->len;
+	nskb = dev_alloc_skb(2 + hdr_len + 2);
+	if (!nskb)
+		return;
+	skb_reserve(nskb, 2);
 	pos = skb_put_zero(nskb, hdr_len);
 	plc_fill_ethhdr(pos, dst, src, ethtype);
 
@@ -491,10 +525,10 @@ void ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 
 	ak60211_pkt_hex_dump(nskb, "ak60211_nexthop_resolved(PLC)", 0);
 	ak60211_pkt_hex_dump(skb, "ak60211_nexthop_resolved(ORI)", 0);
+	hmc_xmit(nskb, iface_id);
 	//hmc_xmit(skb, iface_id);
-
 	/* TODO: tmp for test */
-	kfree(nskb);
+	kfree(skb);
 	return;
 }
 
@@ -542,7 +576,7 @@ static void ak60211_mesh_rx_mgmt_action(struct plc_packet_union *buff)
 	}
 }
 
-int ak60211_rx_handler(struct sk_buff *pskb)
+int ak60211_rx_handler(struct sk_buff *pskb, struct sk_buff *nskb)
 {
 	struct sk_buff *skb = pskb;
 	struct plc_packet_union *plcbuff;
@@ -594,7 +628,8 @@ int ak60211_rx_handler(struct sk_buff *pskb)
 		switch (stype) {
 		case AK60211_STYPE_QOSDATA:
 			plc_info("S_QOSDATA\n");
-			break;
+			return ak60211_mesh_data_handle(&plcdev, plcbuff, skb, nskb);
+			/* break; */
 		}
 		break;
 	}

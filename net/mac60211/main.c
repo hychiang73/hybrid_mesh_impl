@@ -21,9 +21,12 @@ const struct file_operations proc_plc_fops = {
 	.write = plc_proc_test_write,
 };
 
-int plc_hmc_rx(struct sk_buff *skb)
+int plc_hmc_rx(struct sk_buff *skb, struct sk_buff *nskb)
 {
-	return ak60211_rx_handler(skb);
+	int ret;
+	ret = ak60211_rx_handler(skb, nskb);
+
+	return ret;
 }
 EXPORT_SYMBOL(plc_hmc_rx);
 

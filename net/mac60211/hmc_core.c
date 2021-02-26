@@ -63,6 +63,7 @@ static void fdb_flush_tx_pending(struct hmc_fdb_entry *fdb)
 
 	while ((skb = skb_dequeue(&fdb->frame_queue)) != NULL) {
 		skb = skb_dequeue(&fdb->frame_queue);
+		//ak60211_nexthop_resolved(skb, fdb->iface_id);
 		hmc_xmit(skb, fdb->iface_id);
 	}
 }
@@ -224,7 +225,7 @@ struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 	else if (!wlan)
 		return plc;
 	else {
-		hmc_info("pm = %d, wm = %d\n", plc->metric, wlan->metric);
+		//hmc_info("pm = %d, wm = %d\n", plc->metric, wlan->metric);
 		if (plc->metric <= wlan->metric)
 			return plc;
 		else
@@ -468,6 +469,7 @@ int hmc_br_tx_handler(struct sk_buff *skb)
 	if (fdb && (fdb->flags & MESH_PATH_ACTIVE)) {
 		if (!fdb_expired(fdb)) {
 			hmc_info("xmit via %d\n", fdb->iface_id);
+			//ak60211_nexthop_resolved(skb, fdb->iface_id);
 			hmc_xmit(skb, fdb->iface_id);
 			return NF_ACCEPT;
 		}
@@ -497,6 +499,7 @@ int hmc_br_tx_handler(struct sk_buff *skb)
 
 int hmc_br_rx_handler(struct sk_buff *skb)
 {
+	struct sk_buff *nskb = NULL;
 	int ret;
 
 	hmc_print_skb(skb, "hmc_rx_handler");
@@ -504,13 +507,19 @@ int hmc_br_rx_handler(struct sk_buff *skb)
 	mutex_lock(&hmc->rx_mutex);
 
 	/* SNAP data might be inside 802.3 frames even if coming from wifi egress. */
-	ret = plc_hmc_rx(skb);
+	ret = plc_hmc_rx(skb, nskb);
 
 	mutex_unlock(&hmc->rx_mutex);
 
 	/* return to br_handle_frame */
 	if (ret == NF_DROP)
 		return 0;
+	else if (ret == NF_NEW_PKTS) {
+		hmc_info("already get new pkts, send to ip layer\n");
+		//kfree(skb);
+		skb = nskb;
+		return 0;
+	}
 
 	return 1;
 }

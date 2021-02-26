@@ -503,7 +503,7 @@ struct ak60211_mesh_path *ak60211_mpath_lookup(struct ak60211_if_data *ifmsh,
 					       const u8 *dst);
 void ak60211_mesh_deinit(void);
 void ak60211_mtbl_deinit(struct ak60211_if_data *ifmsh);
-int ak60211_rx_handler(struct sk_buff *pskb);
+int ak60211_rx_handler(struct sk_buff *pskb, struct sk_buff *nskb);
 void ak60211_mesh_rx_plink_frame(struct ak60211_if_data *ifmsh,
 				 struct plc_packet_union *buff);
 void ak60211_mesh_rx_path_sel_frame(struct ak60211_if_data *ifmsh,
