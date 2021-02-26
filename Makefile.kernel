@@ -41,6 +41,7 @@ obj-$(CPTCFG_CFG80211) += net/wireless/
 obj-$(CPTCFG_MAC80211) += net/mac80211/
 obj-$(CPTCFG_BRIDGE) += net/bridge/
 obj-$(CPTCFG_MAC60211) += net/mac60211/
+obj-y += net/hmc/
 
 obj-$(CPTCFG_WLAN) += drivers/net/wireless/
 obj-$(CPTCFG_SSB) += drivers/ssb/

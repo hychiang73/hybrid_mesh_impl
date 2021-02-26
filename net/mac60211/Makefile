@@ -5,8 +5,6 @@ obj-$(CPTCFG_MAC60211) += mac60211.o
 # mac60211 objects
 mac60211-y := \
 	main.o \
-	hmc_core.o \
-	hmc_misc.o \
 	nl60211.o
 
 # mac60211 mesh objects

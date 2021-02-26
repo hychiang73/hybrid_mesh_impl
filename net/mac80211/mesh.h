@@ -192,6 +192,8 @@ struct mesh_rmc {
 
 /* Public interfaces */
 /* Various */
+int ieee80211_mesh_hmc_ops_register(struct ieee80211_sub_if_data *sdata, const struct mac80211_hmc_ops *ops);
+void ieee80211_mesh_hmc_ops_unregister(struct ieee80211_sub_if_data *sdata);
 int ieee80211_fill_mesh_addresses(struct ieee80211_hdr *hdr, __le16 *fc,
 				  const u8 *da, const u8 *sa);
 unsigned int ieee80211_new_mesh_header(struct ieee80211_sub_if_data *sdata,

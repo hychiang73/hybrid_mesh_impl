@@ -11,16 +11,17 @@
 #include <linux/if_vlan.h>
 #include <linux/rhashtable.h>
 
-#include "mac60211.h"
-#include "ak60211_mesh_private.h"
+#include "../mac60211/mac60211.h"
+#include "../mac60211/ak60211_mesh_private.h"
 #include "../mac80211/mesh.h"
 #include "../bridge/br_private.h"
 
-#define NF_NEW_PKTS	0x55
+#define HMC_DBG
 
 #define HMC_SKB_QUEUE_LEN		5
 #define HMC_HASH_BITS			8
 #define HMC_MAX_NODES			16
+#define NF_NEW_PKTS				0x55
 #define HMC_DEF_EXP_TIME		(10 * HZ)
 #define HMC_HASH_SIZE			(1 << HMC_HASH_BITS)
 #define CHECK_MEM(X)			((IS_ERR(X) || X == NULL) ? 1 : 0)
@@ -35,7 +36,11 @@
     pr_err("HMC: (%s, %d): " fmt, __func__, __LINE__, ##arg);		\
 })																	\
 
+#ifdef HMC_DBG
 #define HMC_TRACE()	pr_info("HMC: (%s, %d): ", __func__, __LINE__);
+#else
+#define HMC_TRACE()
+#endif
 
 /* debug */
 extern bool hmc_debug;
@@ -92,26 +97,27 @@ struct hmc_core {
 /* core.c */
 struct mesh_path *hmc_wpath_lookup(const u8 *addr);
 struct ak60211_mesh_path *hmc_ppath_lookup(const u8 *addr);
-
 struct hmc_fdb_entry *hmc_fdb_insert(const u8 *addr, u16 iface_id);
 struct hmc_fdb_entry *hmc_fdb_lookup(const u8 *addr, u16 iface_id);
 struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr);
-int hmc_fdb_dump(struct nl60211_mesh_info *info, int size);
+void hmc_path_update(struct hmc_fdb_entry *fdb);
 int hmc_fdb_del(const u8 *addr, u16 iface_id);
+int hmc_xmit(struct sk_buff *skb, int egress);
+struct hmc_core *to_get_hmc(void);
 
-struct hmc_core *hmc_to_core(void);
-int hmc_get_dev_addr(u8 *addr);
-int hmc_xmit(struct sk_buff *skb, enum hmc_port_egress egress);
-
-int hmc_core_init(void);
-void hmc_core_exit(void);
+/* ops.c */
+int hmc_ops_init(struct hmc_core *hmc);
+void hmc_ops_deinit(struct hmc_core *hmc);
+int hmc_ops_fdb_dump(struct nl60211_mesh_info *info, int size);
+void hmc_ops_path_update(const u8 *addr, u32 metric, u32 sn, int flags, int id);
+int hmc_ops_fdb_lookup(struct hmc_fdb_entry *f, const u8 *addr, u16 id);
+int hmc_ops_fdb_insert(const u8 *addr, u16 id);
+int hmc_ops_xmit(struct sk_buff *skb, int egress);
+int hmc_ops_fdb_del(const u8 *addr, u16 id);
 
 /* misc.c */
 void hmc_print_skb(struct sk_buff *skb, const char *type);
 int hmc_misc_init(void);
 void hmc_misc_exit(void);
-
-/* ak60211 function */
-void ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id);
 
 #endif /* _HMC_H */

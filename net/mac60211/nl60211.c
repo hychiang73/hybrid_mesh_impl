@@ -2,7 +2,9 @@
 
 #if IN_JETSON
 #include "nl60211.h"
-#include "hmc.h"
+#include "../hmc/hmc.h"
+#include "mac60211.h"
+#include "ak60211_mesh_private.h"
 #endif
 
 #include <linux/module.h>
@@ -228,6 +230,7 @@ void test_hmc_gen_pkt_snap(
 	unsigned int proto = 0xAA66;
 	struct sk_buff *new_sk;
 	struct ethhdr *ether;
+	struct ak60211_if_data *pdata = ak60211_dev_to_ifdata();
 	//const u8 da[ETH_ALEN] = {0x00,0x04,0x4b,0xe6,0xec,0x3d};
 	//const u8 da[ETH_ALEN] = {0x00,0x19,0x94,0x38,0xfd,0x8e};
 	//const u8 sa[ETH_ALEN] = {0x00,0x04,0x4b,0xec,0x28,0x3b};
@@ -235,6 +238,9 @@ void test_hmc_gen_pkt_snap(
 	u8 sa[ETH_ALEN] = {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff};
 	u8 *pos;
 	int egress = -1;
+
+	if (!pdata->hmc_ops)
+		return;
 
 	for (i = 0; i < total_len; i++) {
 		if (i < 6) {
@@ -288,7 +294,7 @@ void test_hmc_gen_pkt_snap(
 
 	skb_reset_mac_header(new_sk);
 
-	hmc_print_skb(new_sk, "test_hmc_gen_pkt_snap");
+	//hmc_print_skb(new_sk, "test_hmc_gen_pkt_snap");
 
 	switch (type) {
 	case NL60211_SEND_PLC:
@@ -305,7 +311,7 @@ void test_hmc_gen_pkt_snap(
 		break;
 	}
 
-	hmc_xmit(new_sk, egress);
+	pdata->hmc_ops->xmit(new_sk, egress);
 #endif
 }
 
@@ -679,7 +685,7 @@ static void nl60211_cmd_getsa(struct nl60211msg *nlreq)
 	u32 nlmsgsize;
 	s32 return_code = 0;
 	int ret;
-	u8 local_addr[ETH_ALEN] = {0};
+	struct ak60211_if_data *pdata = ak60211_dev_to_ifdata();
 	//local
 	//temp
 
@@ -706,8 +712,7 @@ static void nl60211_cmd_getsa(struct nl60211msg *nlreq)
 	res = (struct nl60211_getsa_res *)nlres->buf;
 	res->return_code = return_code;
 	res->sa_len = 6;
-	hmc_get_dev_addr(local_addr);
-	memcpy(res->sa, local_addr, 6);
+	memcpy(res->sa, pdata->addr, 6);
 
 	//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
 	ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
@@ -721,13 +726,19 @@ static void nl60211_cmd_addmpath(struct nl60211msg *nlreq)
 	//request
 	struct nl60211_addmpath_req *req =
 		(struct nl60211_addmpath_req *)nlreq->buf;
-	struct hmc_fdb_entry *f = hmc_fdb_insert(req->da, req->iface_id);
+	struct ak60211_if_data *pdata = ak60211_dev_to_ifdata();
+	int ret;
 	//response
 	struct nl60211_addmpath_res simpleres;
 	s32 return_code = 0;
 
+	if (!pdata->hmc_ops)
+		return;
+
+	ret = pdata->hmc_ops->fdb_insert(req->da, req->iface_id);
+
 	//response
-	if (CHECK_MEM(f)) {
+	if (ret < 0) {
 		return_code = 1;
 		pr_err("req->iface_id = %d\n", req->iface_id);
 		pr_err("req->da[0] = 0x%02X\n", req->da[0]);
@@ -748,13 +759,19 @@ static void nl60211_cmd_delmpath(struct nl60211msg *nlreq)
 	//request
 	struct nl60211_delmpath_req *req =
 		(struct nl60211_delmpath_req *)nlreq->buf;
-	int ret = hmc_fdb_del(req->da, req->iface_id);
+	struct ak60211_if_data *pdata = ak60211_dev_to_ifdata();
+	int ret;
 	//response
 	//struct sk_buff *skbres;
 	//struct nl60211msg *nlres;
 	//struct nl60211_setmeshid_res *res;
 	//u32 nlmsgsize;
 	struct nl60211_delmpath_res simpleres;
+
+	if (!pdata->hmc_ops)
+		return;
+
+	ret = pdata->hmc_ops->fdb_del(req->da, req->iface_id);
 
 	simpleres.return_code = (s32)ret;
 	nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
@@ -770,13 +787,19 @@ static void nl60211_cmd_getmpath(struct nl60211msg *nlreq)
 	//request
 	struct nl60211_getmpath_req *req =
 		(struct nl60211_getmpath_req *)nlreq->buf;
-	struct hmc_fdb_entry *f = hmc_fdb_lookup(req->da, req->iface_id);
+	struct hmc_fdb_entry f;
+	struct ak60211_if_data *pdata = ak60211_dev_to_ifdata();
 	//response
 	struct sk_buff *skbres;
 	struct nl60211msg *nlres;
 	struct nl60211_getmpath_res *res;
 	u32 nlmsgsize;
 	int ret;
+
+	if (!pdata->hmc_ops)
+		return;
+
+	ret = pdata->hmc_ops->fdb_lookup(&f, req->da, req->iface_id);
 
 	//response
 	if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
@@ -799,14 +822,14 @@ static void nl60211_cmd_getmpath(struct nl60211msg *nlreq)
 	nlres->if_index = nlreq->if_index;
 
 	res = (struct nl60211_getmpath_res *)nlres->buf;
-	if (f) {
+	if (ret == 0) {
 		res->return_code = 0;
-		memcpy(res->da, f->addr, ETH_ALEN);
-		res->iface_id = f->iface_id;
-		res->sn = f->sn;
-		res->metric = f->metric;
-		res->flags = (u32)f->flags;
-		res->exp_time = f->exp_time;
+		memcpy(res->da, f.addr, ETH_ALEN);
+		res->iface_id = f.iface_id;
+		res->sn = f.sn;
+		res->metric = f.metric;
+		res->flags = (u32)f.flags;
+		res->exp_time = f.exp_time;
 	} else {
 		res->return_code = -1;
 	}
@@ -822,6 +845,7 @@ static void nl60211_cmd_dumpmpath(struct nl60211msg *nlreq)
 {
 	//request
 	struct nl60211_mesh_info info[HMC_MAX_NODES] = {0};
+	struct ak60211_if_data *pdata = ak60211_dev_to_ifdata();
 	//response
 	struct sk_buff *skbres;
 	struct nl60211msg *nlres;
@@ -829,7 +853,10 @@ static void nl60211_cmd_dumpmpath(struct nl60211msg *nlreq)
 	u32 nlmsgsize, i = 0;
 	int ret, do_final_msg = 0;
 
-	if (hmc_fdb_dump(info, HMC_MAX_NODES) < 0) {
+	if (!pdata->hmc_ops)
+		return;
+
+	if (pdata->hmc_ops->fdb_dump(info, HMC_MAX_NODES) < 0) {
 		pr_err("info size is overflow\n");
 		do_final_msg = 1;
 	}
@@ -1074,10 +1101,6 @@ int test_br_hmc_rx_snap(struct sk_buff *skb)
 	nl60211_rx_callback(skb);
 	return 0;
 }
-
-//static struct net_bridge_hmc_ops test_br_hmc_ops_f = {
-//	.rx = test_br_hmc_rx_snap,
-//};
 
 int nl60211_netlink_init(void)
 {

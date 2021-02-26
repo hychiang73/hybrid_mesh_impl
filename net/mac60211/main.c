@@ -1,8 +1,7 @@
 
 #include "mac60211.h"
-#include "ak60211_mesh_private.h"
 #include "nl60211.h"
-#include "hmc.h"
+#include "ak60211_mesh_private.h"
 
 bool plc_dbg;
 
@@ -144,36 +143,33 @@ static int __init plc_init(void)
 	int ret = 0;
 	u8 local_addr[ETH_ALEN] = {0};
 	bool ifmesh = 0;
+	struct net_device *dev;
 
 	PLC_TRACE();
-
-	if (hmc_core_init() < 0) {
-		hmc_err("Failed to initialize HMC\n");
-		return -ENOMEM;
-	}
 
 	nl60211_netlink_init();
 
 	plc_proc_init();
 
-	hmc_get_dev_addr(local_addr);
+	dev = dev_get_by_name(&init_net, "br0");
+
+	memcpy(local_addr, dev->dev_addr, ETH_ALEN);
 
 	ifmesh = ak60211_mesh_init("AkiraNet", local_addr);
-	sbeacon_wq_init();
-
 	if (!ifmesh)
 		plc_err("mesh interface %pM init fail\n", local_addr);
 	else
 		plc_info("mesh interface %pM init success\n", local_addr);
 
+	sbeacon_wq_init();
+
+	dev_put(dev);
 	return ret;
 }
 
 static void __exit plc_deinit(void)
 {
 	PLC_TRACE();
-
-	hmc_core_exit();
 
 	remove_proc_entry("plc", proc_dir_plc);
 	remove_proc_entry("hmc_plc", NULL);

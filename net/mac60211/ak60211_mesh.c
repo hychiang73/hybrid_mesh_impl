@@ -204,6 +204,9 @@ void ak60211_mesh_plink_frame_tx(struct ak60211_if_data *ifmsh,
 	struct plc_hdr *plchdr;
 	u8 *pos;
 
+	if (!ifmsh->hmc_ops)
+		return;
+
 	/* headroom + ETH header + plchdr + action + fcs + reserved */
 	nskb = dev_alloc_skb(2 + ETH_HLEN +
 			42 + 79 + 4 + 2);
@@ -270,7 +273,7 @@ void ak60211_mesh_plink_frame_tx(struct ak60211_if_data *ifmsh,
 
 	ak60211_pkt_hex_dump(nskb, "ak60211_send", 0);
 
-	hmc_xmit(nskb, HMC_PORT_PLC);
+	ifmsh->hmc_ops->xmit(nskb, HMC_PORT_PLC);
 }
 
 int ak60211_mpath_error_tx(struct ak60211_if_data *ifmsh, u8 ttl,
@@ -285,6 +288,10 @@ int ak60211_mpath_error_tx(struct ak60211_if_data *ifmsh, u8 ttl,
 	u8 sa[ETH_ALEN];
 
 	PLC_TRACE();
+
+	if (!ifmsh->hmc_ops)
+		return -1;
+
 	skb = dev_alloc_skb(2 + hdr_len + 2);
 
 	if (!skb)
@@ -323,7 +330,8 @@ int ak60211_mpath_error_tx(struct ak60211_if_data *ifmsh, u8 ttl,
 	skb_reset_mac_header(skb);
 
 	ak60211_pkt_hex_dump(skb, "ak60211_mpath_error_tx", 0);
-	hmc_xmit(skb, HMC_PORT_PLC);
+
+	ifmsh->hmc_ops->xmit(skb, HMC_PORT_PLC);
 
 	return true;
 }
@@ -341,6 +349,10 @@ int ak60211_mpath_sel_frame_tx(enum ak60211_mpath_frame_type action, u8 flags,
 	u8 sa[ETH_ALEN];
 
 	PLC_TRACE();
+
+	if (!ifmsh->hmc_ops)
+		return -1;
+
 	switch (action) {
 	case AK60211_MPATH_PREQ:
 		hdr_len += sizeof(struct preq_pkts);
@@ -433,7 +445,7 @@ int ak60211_mpath_sel_frame_tx(enum ak60211_mpath_frame_type action, u8 flags,
 	skb_reset_mac_header(skb);
 
 	ak60211_pkt_hex_dump(skb, "ak60211_mpath_sel_frame_tx", 0);
-	hmc_xmit(skb, HMC_PORT_PLC);
+	ifmsh->hmc_ops->xmit(skb, HMC_PORT_PLC);
 
 	return true;
 }
@@ -480,7 +492,7 @@ void ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 	struct sk_buff *nskb;
 	struct plc_packet_union *plcpkts;
 	struct ak60211_mesh_path *mpath = NULL;
-	struct ak60211_if_data *ifmsh;
+	struct ak60211_if_data *ifmsh = ak60211_dev_to_ifdata();
 	int hdr_len = sizeof(struct ethhdr) + sizeof(struct plc_hdr);
 	u8 dst[ETH_ALEN], src[ETH_ALEN];
 	__le16 ethtype;
@@ -488,9 +500,9 @@ void ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 
 	PLC_TRACE();
 
-	// hmc_xmit(skb, iface_id);
-	// return;
-	ifmsh = ak60211_dev_to_ifdata();
+	if (!ifmsh->hmc_ops)
+		return;
+
 	/* Get ethernet hdr */
 	memcpy(&dst, skb->data, ETH_ALEN);
 	memcpy(&src, skb->data + ETH_ALEN, ETH_ALEN);
@@ -525,8 +537,8 @@ void ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 
 	ak60211_pkt_hex_dump(nskb, "ak60211_nexthop_resolved(PLC)", 0);
 	ak60211_pkt_hex_dump(skb, "ak60211_nexthop_resolved(ORI)", 0);
-	hmc_xmit(nskb, iface_id);
-	//hmc_xmit(skb, iface_id);
+	ifmsh->hmc_ops->xmit(nskb, iface_id);
+
 	/* TODO: tmp for test */
 	kfree(skb);
 	return;
@@ -738,18 +750,16 @@ void plc_send_beacon(void)
 {
 	struct sk_buff *nskb;
 	struct plc_packet_union sbeacon;
+	struct ak60211_if_data *ifmsh = ak60211_dev_to_ifdata();
 	int beacon_len = sizeof(struct ethhdr) +
 			 sizeof(struct plc_hdr) +
 			 sizeof(struct beacon_pkts);
 	u8 *pos;
-	u8 local_addr[ETH_ALEN] = {0};
 
 	PLC_TRACE();
 
-	if (hmc_get_dev_addr(local_addr) < 0 || !is_valid_ether_addr(local_addr)) {
-		plc_err("Invaild local mac address\n");
+	if (!ifmsh->hmc_ops)
 		return;
-	}
 
 	// beacon packet size is 92 bytes
 	nskb = dev_alloc_skb(2 + beacon_len + 2);
@@ -763,10 +773,10 @@ void plc_send_beacon(void)
 	pos = skb_put_zero(nskb, beacon_len);
 
 	plc_fill_ethhdr((u8 *)&sbeacon, broadcast_addr,
-			local_addr, ntohs(0xAA55));
+			plcdev.addr, ntohs(0xAA55));
 
-	memcpy(sbeacon.plchdr.machdr.h_addr2, local_addr, ETH_ALEN);
-	memcpy(sbeacon.plchdr.machdr.h_addr4, local_addr, ETH_ALEN);
+	memcpy(sbeacon.plchdr.machdr.h_addr2, plcdev.addr, ETH_ALEN);
+	memcpy(sbeacon.plchdr.machdr.h_addr4, plcdev.addr, ETH_ALEN);
 
 	memcpy(pos, &sbeacon, beacon_len);
 
@@ -778,7 +788,7 @@ void plc_send_beacon(void)
 
 	ak60211_pkt_hex_dump(nskb, "plc_beacon_send", 0);
 
-	hmc_xmit(nskb, HMC_PORT_PLC);
+	ifmsh->hmc_ops->xmit(nskb, HMC_PORT_PLC);
 }
 
 int ak60211_mpath_queue_preq(const u8 *addr)
@@ -919,6 +929,22 @@ static void ak60211_mesh_wrkq_start(struct ak60211_if_data *ifmsh)
 	INIT_WORK(&ifmsh->work, ak60211_iface_work);
 	queue_work(ifmsh->workqueue, &ifmsh->work);
 }
+
+int ak60211_mesh_hmc_ops_register(const struct ak60211_hmc_ops *ops)
+{
+	if (!ops->path_update || !ops->xmit)
+		return -EINVAL;
+
+	plcdev.hmc_ops = ops;
+	return 0;
+}
+EXPORT_SYMBOL(ak60211_mesh_hmc_ops_register);
+
+void ak60211_mesh_hmc_ops_unregister(void)
+{
+	plcdev.hmc_ops = NULL;
+}
+EXPORT_SYMBOL(ak60211_mesh_hmc_ops_unregister);
 
 bool ak60211_mesh_init(u8 *id, u8 *mac)
 {

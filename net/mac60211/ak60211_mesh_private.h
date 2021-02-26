@@ -40,8 +40,7 @@
 #include <linux/skbuff.h>
 #include <linux/jiffies.h>
 
-//#include "../bridge/br_private.h"
-#include "hmc.h"
+#include "../hmc/hmc.h"
 #include "mac60211.h"
 
 #define plc_debug(fmt, arg...)							\
@@ -239,6 +238,21 @@ struct ak60211_sta_info {
 	u8	addr[6];
 };
 
+struct hmc_fdb_entry;
+struct nl60211_mesh_info;
+
+/*
+ * struct ak60211_hmc_ops - callback from ak60211 mesh to hybrid mesh core
+ */
+struct ak60211_hmc_ops {
+	void (*path_update)(const u8 *addr, u32 metric, u32 sn, int flags, int id);
+	int (*xmit)(struct sk_buff *skb, int egress);
+	int (*fdb_insert)(const u8 *addr, u16 id);
+	int (*fdb_lookup)(struct hmc_fdb_entry *f, const u8 *addr, u16 id);
+	int (*fdb_del)(const u8 *addr, u16 id);
+	int (*fdb_dump)(struct nl60211_mesh_info *info, int size);
+};
+
 struct ak60211_if_data {
 	struct timer_list housekeeping_timer;
 	struct timer_list mesh_path_timer;
@@ -254,6 +268,9 @@ struct ak60211_if_data {
 	u32 preq_id;
 	unsigned long last_sn_update;
 	u32 mesh_seqnum;
+
+	/* hmc ops */
+	const struct ak60211_hmc_ops *hmc_ops;
 
 	u8 addr[ETH_ALEN];
 	u8 mesh_id[MAX_MESH_ID_LEN];
@@ -538,6 +555,8 @@ int ak60211_mpath_queue_preq(const u8 *addr);
 int __ak60211_mpath_queue_preq(struct ak60211_if_data *ifmsh,
 									const u8 *dst, u8 flags);
 struct ak60211_if_data *ak60211_dev_to_ifdata(void);
+int ak60211_mesh_hmc_ops_register(const struct ak60211_hmc_ops *ops);
+void ak60211_mesh_hmc_ops_unregister(void);
 
 void ak60211_mplink_timer(struct timer_list *t);
 int ak60211_mpath_error_tx(struct ak60211_if_data *ifmsh, u8 ttl, const u8 *target,

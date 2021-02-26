@@ -184,14 +184,9 @@ static u32 ak60211_hwmp_route_info_get(struct ak60211_if_data *ifmsh,
 			spin_unlock_bh(&mpath->state_lock);
 			/* TODO: ewma_mesh_fail_avg */
 
-			/* information for BR-HMC */
-			//memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
-			//plc->path->flags = mpath->flags;
-			//plc->path->sn = mpath->sn;
-			//plc->path->metric = mpath->metric;
-			//plc_debug("flags:0x%x, sn:0x%x, metric:0x%x\n",
-			//	  plc->path->flags, plc->path->sn, plc->path->metric);
-			//br_hmc_path_update(plc);
+			/* Update path to HMC */
+			if (ifmsh->hmc_ops)
+				ifmsh->hmc_ops->path_update(mpath->dst, mpath->metric, mpath->sn, mpath->flags, HMC_PORT_PLC);
 		} else {
 			spin_unlock_bh(&mpath->state_lock);
 		}
@@ -234,7 +229,10 @@ static u32 ak60211_hwmp_route_info_get(struct ak60211_if_data *ifmsh,
 		spin_unlock_bh(&mpath->state_lock);
 		/* todo: ewma_mesh_fail_avg */
 
-		/* information for BR-HMC */
+		/* Update path to HMC */
+		if (ifmsh->hmc_ops)
+			ifmsh->hmc_ops->path_update(mpath->dst, mpath->metric, mpath->sn, mpath->flags, HMC_PORT_PLC);
+
 		//memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
 		//plc->path->flags = mpath->flags;
 		//plc->path->sn = mpath->sn;
@@ -565,6 +563,10 @@ void ak60211_mpath_start_discovery(struct ak60211_if_data *ifmsh)
 
 	spin_unlock_bh(&mpath->state_lock);
 	da = broadcast_addr;
+
+	/* Update path to HMC */
+	if (ifmsh->hmc_ops)
+		ifmsh->hmc_ops->path_update(mpath->dst, MAX_METRIC, mpath->sn, mpath->flags, HMC_PORT_PLC);
 
 	//memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
 	//plc->path->flags = mpath->flags;

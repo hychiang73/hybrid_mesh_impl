@@ -18,6 +18,17 @@
 
 #define MAX_PREQ_QUEUE_LEN	64
 
+#define HMC_DBG
+
+#ifdef HMC_DBG
+#define hmc_info(fmt, arg...)										\
+({																	\
+    pr_info("HMC: (%s, %d): " fmt, __func__, __LINE__, ##arg);		\
+})
+#else
+#define hmc_info(fmt, arg...)
+#endif
+
 //static void mesh_queue_preq(struct mesh_path *, u8);
 
 static inline u32 u32_field_get(const u8 *preq_elem, int offset, bool ae)
@@ -133,18 +144,21 @@ static int mesh_path_sel_frame_tx(enum mpath_frame_type action, u8 flags,
 	switch (action) {
 	case MPATH_PREQ:
 		mhwmp_dbg(sdata, "sending PREQ to %pM\n", target);
+		hmc_info("sending PREQ to %pM\n", target);
 		ie_len = 37;
 		pos = skb_put(skb, 2 + ie_len);
 		*pos++ = WLAN_EID_PREQ;
 		break;
 	case MPATH_PREP:
 		mhwmp_dbg(sdata, "sending PREP to %pM\n", orig_addr);
+		hmc_info("sending PREP to %pM\n", orig_addr);
 		ie_len = 31;
 		pos = skb_put(skb, 2 + ie_len);
 		*pos++ = WLAN_EID_PREP;
 		break;
 	case MPATH_RANN:
 		mhwmp_dbg(sdata, "sending RANN from %pM\n", orig_addr);
+		hmc_info("sending RANN from %pM\n", orig_addr);
 		ie_len = sizeof(struct ieee80211_rann_ie);
 		pos = skb_put(skb, 2 + ie_len);
 		*pos++ = WLAN_EID_RANN;
@@ -242,6 +256,8 @@ int mesh_path_error_tx(struct ieee80211_sub_if_data *sdata,
 	u8 *pos, ie_len;
 	int hdr_len = offsetofend(struct ieee80211_mgmt,
 				  u.action.u.mesh_action);
+
+	hmc_info();
 
 	if (time_before(jiffies, ifmsh->next_perr))
 		return -EAGAIN;
@@ -382,6 +398,7 @@ static u32 hwmp_route_info_get(struct ieee80211_sub_if_data *sdata,
 			       const u8 *hwmp_ie, enum mpath_frame_type action)
 {
 	struct ieee80211_local *local = sdata->local;
+	struct ieee80211_if_mesh *ifmsh = &sdata->u.mesh;
 	struct mesh_path *mpath;
 	struct sta_info *sta;
 	bool fresh_info;
@@ -504,6 +521,10 @@ static u32 hwmp_route_info_get(struct ieee80211_sub_if_data *sdata,
 			/* draft says preq_id should be saved to, but there does
 			 * not seem to be any use for it, skipping by now
 			 */
+
+			/* Update path to HMC */
+			if (ifmsh->hmc_ops)
+				ifmsh->hmc_ops->path_update(mpath->dst, mpath->metric, mpath->sn, mpath->flags, 2);
 		} else
 			spin_unlock_bh(&mpath->state_lock);
 	}
@@ -547,6 +568,9 @@ static u32 hwmp_route_info_get(struct ieee80211_sub_if_data *sdata,
 			/* init it at a low value - 0 start is tricky */
 			ewma_mesh_fail_avg_add(&sta->mesh->fail_avg, 1);
 			mesh_path_tx_pending(mpath);
+			/* Update path to HMC */
+			if (ifmsh->hmc_ops)
+				ifmsh->hmc_ops->path_update(mpath->dst, mpath->metric, mpath->sn, mpath->flags, 2);
 		} else
 			spin_unlock_bh(&mpath->state_lock);
 	}
@@ -581,9 +605,11 @@ static void hwmp_preq_frame_process(struct ieee80211_sub_if_data *sdata,
 	root_is_gate = !!(flags & RANN_FLAG_IS_GATE);
 
 	mhwmp_dbg(sdata, "received PREQ from %pM\n", orig_addr);
+	hmc_info("received PREQ from %pM\n", orig_addr);
 
 	if (ether_addr_equal(target_addr, sdata->vif.addr)) {
 		mhwmp_dbg(sdata, "PREQ is for us\n");
+		hmc_info("PREQ is for us");
 		forward = false;
 		reply = true;
 		target_metric = 0;
@@ -639,6 +665,7 @@ static void hwmp_preq_frame_process(struct ieee80211_sub_if_data *sdata,
 		ttl = ifmsh->mshcfg.element_ttl;
 		if (ttl != 0) {
 			mhwmp_dbg(sdata, "replying to the PREQ\n");
+			hmc_info("replying to the PREQ\n");
 			mesh_path_sel_frame_tx(MPATH_PREP, 0, orig_addr,
 					       orig_sn, 0, target_addr,
 					       target_sn, mgmt->sa, 0, ttl,
@@ -660,6 +687,7 @@ static void hwmp_preq_frame_process(struct ieee80211_sub_if_data *sdata,
 			return;
 		}
 		mhwmp_dbg(sdata, "forwarding the PREQ from %pM\n", orig_addr);
+		hmc_info("forwarding the PREQ from %pM\n", orig_addr);
 		--ttl;
 		preq_id = PREQ_IE_PREQ_ID(preq_elem);
 		hopcount = PREQ_IE_HOPCOUNT(preq_elem) + 1;
@@ -705,6 +733,7 @@ static void hwmp_prep_frame_process(struct ieee80211_sub_if_data *sdata,
 
 	mhwmp_dbg(sdata, "received PREP from %pM\n",
 		  PREP_IE_TARGET_ADDR(prep_elem));
+	hmc_info("received PREP from %pM\n", PREP_IE_TARGET_ADDR(prep_elem));
 
 	orig_addr = PREP_IE_ORIG_ADDR(prep_elem);
 	if (ether_addr_equal(orig_addr, sdata->vif.addr))
@@ -764,6 +793,8 @@ static void hwmp_perr_frame_process(struct ieee80211_sub_if_data *sdata,
 	const u8 *ta, *target_addr;
 	u32 target_sn;
 	u16 target_rcode;
+
+	hmc_info();
 
 	ta = mgmt->sa;
 	ttl = PERR_IE_TTL(perr_elem);
@@ -836,6 +867,7 @@ static void hwmp_rann_frame_process(struct ieee80211_sub_if_data *sdata,
 	mhwmp_dbg(sdata,
 		  "received RANN from %pM via neighbour %pM (is_gate=%d)\n",
 		  orig_addr, mgmt->sa, root_is_gate);
+	hmc_info("received RANN from %pM via neighbour %pM (is_gate=%d)\n", orig_addr, mgmt->sa, root_is_gate);
 
 	rcu_read_lock();
 	sta = sta_info_get(sdata, mgmt->sa);
@@ -873,6 +905,7 @@ static void hwmp_rann_frame_process(struct ieee80211_sub_if_data *sdata,
 		mhwmp_dbg(sdata,
 			  "time to refresh root mpath %pM\n",
 			  orig_addr);
+		hmc_info("time to refresh root mpath %pM\n", orig_addr);
 		mesh_queue_preq(mpath, PREQ_Q_F_START | PREQ_Q_F_REFRESH);
 		mpath->last_preq_to_root = jiffies;
 	}
@@ -975,7 +1008,7 @@ void mesh_queue_preq(struct mesh_path *mpath, u8 flags)
 	struct ieee80211_if_mesh *ifmsh = &sdata->u.mesh;
 	struct mesh_preq_queue *preq_node;
 
-	pr_info("%s\n", __func__);
+	hmc_info();
 
 	preq_node = kmalloc(sizeof(struct mesh_preq_queue), GFP_ATOMIC);
 	if (!preq_node) {
@@ -1039,11 +1072,14 @@ void mesh_path_start_discovery(struct ieee80211_sub_if_data *sdata)
 	const u8 *da;
 	u32 lifetime;
 
+	hmc_info();
+
 	spin_lock_bh(&ifmsh->mesh_preq_queue_lock);
 	if (!ifmsh->preq_queue_len ||
 		time_before(jiffies, ifmsh->last_preq +
 				min_preq_int_jiff(sdata))) {
 		spin_unlock_bh(&ifmsh->mesh_preq_queue_lock);
+		hmc_info("queue len =%d, queue time = %d\n", ifmsh->preq_queue_len, time_before(jiffies, ifmsh->last_preq + min_preq_int_jiff(sdata)));
 		return;
 	}
 
@@ -1104,6 +1140,12 @@ void mesh_path_start_discovery(struct ieee80211_sub_if_data *sdata)
 
 	spin_unlock_bh(&mpath->state_lock);
 	da = (mpath->is_root) ? mpath->rann_snd_addr : broadcast_addr;
+	hmc_info("prepare to send PREQ\n");
+
+	/* Update path to HMC */
+	if (ifmsh->hmc_ops)
+		ifmsh->hmc_ops->path_update(mpath->dst, MAX_METRIC, mpath->sn, mpath->flags, 2);
+
 	mesh_path_sel_frame_tx(MPATH_PREQ, 0, sdata->vif.addr, ifmsh->sn,
 			       target_flags, mpath->dst, mpath->sn, da, 0,
 			       ttl, lifetime, 0, ifmsh->preq_id++, sdata);
@@ -1114,6 +1156,7 @@ void mesh_path_start_discovery(struct ieee80211_sub_if_data *sdata)
 	spin_unlock_bh(&mpath->state_lock);
 
 enddiscovery:
+	hmc_info("End discovery path\n");
 	rcu_read_unlock();
 	kfree(preq_node);
 }
@@ -1139,6 +1182,8 @@ int mesh_nexthop_resolve(struct ieee80211_sub_if_data *sdata,
 	struct sk_buff *skb_to_free = NULL;
 	u8 *target_addr = hdr->addr3;
 
+	hmc_info();
+
 	/* Nulls are only sent to peers for PS and should be pre-addressed */
 	if (ieee80211_is_qos_nullfunc(hdr->frame_control))
 		return 0;
@@ -1163,6 +1208,8 @@ int mesh_nexthop_resolve(struct ieee80211_sub_if_data *sdata,
 	if (!(mpath->flags & MESH_PATH_RESOLVING) &&
 	    mesh_path_sel_is_hwmp(sdata))
 		mesh_queue_preq(mpath, PREQ_Q_F_START);
+
+	hmc_info("queue frames\n");
 
 	if (skb_queue_len(&mpath->frame_queue) >= MESH_FRAME_QUEUE_LEN)
 		skb_to_free = skb_dequeue(&mpath->frame_queue);
@@ -1211,6 +1258,7 @@ int mesh_nexthop_lookup(struct ieee80211_sub_if_data *sdata,
 		memcpy(hdr->addr1, next_hop->sta.addr, ETH_ALEN);
 		memcpy(hdr->addr2, sdata->vif.addr, ETH_ALEN);
 		ieee80211_mps_set_frame_flags(sdata, next_hop, hdr);
+		hmc_info("next hop is found\n");
 		return 0;
 	}
 
@@ -1221,6 +1269,7 @@ void mesh_path_timer(struct timer_list *t)
 {
 	struct mesh_path *mpath = from_timer(mpath, t, timer);
 	struct ieee80211_sub_if_data *sdata = mpath->sdata;
+	struct ieee80211_if_mesh *ifmsh = &sdata->u.mesh;
 	int ret;
 
 	if (sdata->local->quiescing)
@@ -1242,6 +1291,11 @@ void mesh_path_timer(struct timer_list *t)
 				  MESH_PATH_RESOLVED |
 				  MESH_PATH_REQ_QUEUED);
 		mpath->exp_time = jiffies;
+
+		/* Update path to HMC */
+		if (ifmsh->hmc_ops)
+			ifmsh->hmc_ops->path_update(mpath->dst, MAX_METRIC, mpath->sn, mpath->flags, 2);
+
 		spin_unlock_bh(&mpath->state_lock);
 		if (!mpath->is_gate && mesh_gate_num(sdata) > 0) {
 			ret = mesh_path_send_to_gates(mpath);

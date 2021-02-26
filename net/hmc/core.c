@@ -1,5 +1,5 @@
 /*
- *	Hybrid mesh core (HMC) implementations
+ *	Hybrid mesh core (HMC) experiment
  *
  *	Authors:
  *	Dicky Chiang		<chiang@akiranet.com>
@@ -41,10 +41,11 @@ static u32 fdb_salt __read_mostly;
 
 struct hmc_core *hmc = NULL;
 
-struct hmc_core *hmc_to_core(void)
+struct hmc_core *to_get_hmc(void)
 {
 	return hmc;
 }
+EXPORT_SYMBOL(to_get_hmc);
 
 static inline int hmc_mac_hash(const u8 *mac, u16 iface_id)
 {
@@ -54,12 +55,16 @@ static inline int hmc_mac_hash(const u8 *mac, u16 iface_id)
 
 static void fdb_discard_frame(struct sk_buff *skb)
 {
+	HMC_TRACE();
+
 	kfree_skb(skb);
 }
 
 static void fdb_flush_tx_pending(struct hmc_fdb_entry *fdb)
 {
 	struct sk_buff *skb;
+
+	HMC_TRACE();
 
 	while ((skb = skb_dequeue(&fdb->frame_queue)) != NULL) {
 		skb = skb_dequeue(&fdb->frame_queue);
@@ -71,6 +76,8 @@ static void fdb_flush_tx_pending(struct hmc_fdb_entry *fdb)
 static void fdb_flush_pending(struct hmc_fdb_entry *fdb)
 {
 	struct sk_buff *skb;
+
+	HMC_TRACE();
 
 	while ((skb = skb_dequeue(&fdb->frame_queue)) != NULL)
 		fdb_discard_frame(skb);
@@ -92,6 +99,8 @@ static int fdb_delete(const u8 *addr, u16 iface_id)
 	struct hlist_head *head = &hmc->hash[hmc_mac_hash(addr, iface_id)];
 	struct hmc_fdb_entry *fdb;
 
+	HMC_TRACE();
+
 	fdb = fdb_find(head, addr, iface_id);
 	if (CHECK_MEM(fdb))
 		return -ENOENT;
@@ -106,6 +115,8 @@ static int fdb_delete(const u8 *addr, u16 iface_id)
 static struct hmc_fdb_entry *fdb_create(struct hlist_head *head, const u8 *addr, u16 iface_id)
 {
 	struct hmc_fdb_entry *fdb;
+
+	HMC_TRACE();
 
 	fdb = kmem_cache_alloc(hmc_fdb_cache, GFP_ATOMIC);
 	if (!CHECK_MEM(fdb)) {
@@ -126,6 +137,8 @@ static struct hmc_fdb_entry *fdb_insert(const u8 *addr, u16 iface_id)
 	struct hlist_head *head = &hmc->hash[hmc_mac_hash(addr, iface_id)];
 	struct hmc_fdb_entry *fdb;
 
+	HMC_TRACE();
+
 	if (!is_valid_ether_addr(addr))
 		return NULL;
 
@@ -141,12 +154,6 @@ static struct hmc_fdb_entry *fdb_insert(const u8 *addr, u16 iface_id)
 	return fdb;
 }
 
-static bool fdb_expired(struct hmc_fdb_entry *f)
-{
-	return (f->flags & MESH_PATH_ACTIVE) &&
-	       time_after(jiffies, f->exp_time + hmc->aging_time);
-}
-
 int hmc_fdb_del(const u8 *addr, u16 iface_id)
 {
 	int ret;
@@ -160,7 +167,6 @@ int hmc_fdb_del(const u8 *addr, u16 iface_id)
 	spin_unlock_bh(&hmc->hash_lock);
 	return ret;
 }
-EXPORT_SYMBOL(hmc_fdb_del);
 
 struct hmc_fdb_entry *hmc_fdb_insert(const u8 *addr, u16 iface_id)
 {
@@ -179,7 +185,6 @@ struct hmc_fdb_entry *hmc_fdb_insert(const u8 *addr, u16 iface_id)
 	spin_unlock_bh(&hmc->hash_lock);
 	return fdb;
 }
-EXPORT_SYMBOL(hmc_fdb_insert);
 
 struct hmc_fdb_entry *hmc_fdb_lookup(const u8 *addr, u16 iface_id)
 {
@@ -194,12 +199,13 @@ struct hmc_fdb_entry *hmc_fdb_lookup(const u8 *addr, u16 iface_id)
 
 	return fdb;
 }
-EXPORT_SYMBOL(hmc_fdb_lookup);
 
 struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 {
 	int i, cnt = 0;
 	struct hmc_fdb_entry *f = NULL, *plc = NULL, *wlan = NULL;
+
+	HMC_TRACE();
 
 	for (i = 0; i < HMC_HASH_SIZE; i++) {
 		hlist_for_each_entry_rcu(f, &hmc->hash[i], hlist) {
@@ -216,7 +222,7 @@ struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 		}
 	}
 	
-	hmc_info("p = %p, w = %p\n", plc, wlan);
+	hmc_dbg("p = %p, w = %p\n", plc, wlan);
 
 	if (!plc && !wlan)
 		return NULL;
@@ -225,47 +231,20 @@ struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 	else if (!wlan)
 		return plc;
 	else {
-		//hmc_info("pm = %d, wm = %d\n", plc->metric, wlan->metric);
+		hmc_info("pm = %d, wm = %d\n", plc->metric, wlan->metric);
 		if (plc->metric <= wlan->metric)
 			return plc;
 		else
 			return wlan;
 	}
 }
-EXPORT_SYMBOL(hmc_fdb_lookup_best);
 
-int hmc_fdb_dump(struct nl60211_mesh_info *info, int size)
+void hmc_path_update(struct hmc_fdb_entry *fdb)
 {
-	int i = 0, idx = 0;
-	struct hmc_fdb_entry *f;
+	HMC_TRACE();
 
-	spin_lock_bh(&hmc->hash_lock);
-
-	for (i = 0; i < HMC_HASH_SIZE; i++) {
-		hlist_for_each_entry_rcu(f, &hmc->hash[i], hlist) {
-			if (!is_valid_ether_addr(f->addr) || is_zero_ether_addr(f->addr))
-				continue;
-
-			if (f->iface_id == HMC_PORT_PLC || f->iface_id == HMC_PORT_WIFI) {
-				if (idx > size) {
-					spin_unlock_bh(&hmc->hash_lock);
-					return -1;
-				}
-
-				memcpy(info[idx].dst, f->addr, ETH_ALEN);
-				info[idx].metric = f->metric;
-				info[idx].sn = f->sn;
-				info[idx].flags = f->flags;
-				info[idx].iface_id = f->iface_id;
-				idx++;
-			}
-		}
-	}
-
-	spin_unlock_bh(&hmc->hash_lock);
-	return 0;
+	fdb_flush_tx_pending(fdb);
 }
-EXPORT_SYMBOL(hmc_fdb_dump);
 
 struct mesh_path *hmc_wpath_lookup(const u8 *addr)
 {
@@ -312,17 +291,22 @@ struct ak60211_mesh_path *hmc_ppath_lookup(const u8 *addr)
 	return ppath;
 }
 
-static int hmc_wlan_path_resolve(struct hmc_fdb_entry *fdb, const u8 *addr)
+static void hmc_wlan_path_resolve(struct hmc_fdb_entry *fdb, const u8 *addr)
 {
 	struct mesh_path *mpath;
 	struct ieee80211_sub_if_data *sdata;
 
 	HMC_TRACE();
 
+	if (fdb->flags & MESH_PATH_RESOLVING) {
+		hmc_info("WIFI mesh path is resolving ...\n");
+		return;
+	}
+
 	sdata = IEEE80211_DEV_TO_SUB_IF(hmc->wdev);
 	if (!sdata) {
 		hmc_err("mesh priv data is null\n");
-		return -ENODEV;
+		return;
 	}
 
 	mpath = hmc_wpath_lookup(addr);
@@ -330,68 +314,28 @@ static int hmc_wlan_path_resolve(struct hmc_fdb_entry *fdb, const u8 *addr)
 		mpath = mesh_path_add(sdata, addr);
 		if (IS_ERR(mpath)) {
 			hmc_info("Failed to resolved wlan path\n");
-			return -EINVAL;
+			return;
 		}
 	}
 
-	if (mpath->flags & MESH_PATH_ACTIVE) {
-		hmc_info("WIFI mesh path is active, update fdb and flush\n");
-		fdb->metric = mpath->metric;
-		fdb->sn = mpath->sn;
-		fdb->iface_id = HMC_PORT_WIFI;
-		fdb->flags = mpath->flags;
-		fdb->exp_time = jiffies;
-		fdb_flush_tx_pending(fdb);
-		return 0;
-	}
-
-	if (mpath->flags & MESH_PATH_RESOLVING) {
-		hmc_info("WIFI mesh path is resolving ...\n");
-		return 0;
-	} else {
-		hmc_info("Try to resolve wifi mesh path\n");
-		mesh_queue_preq(mpath, PREQ_Q_F_START);
-	}
-
-	return 0;
+	hmc_info("Try to resolve wifi mesh path\n");
+	mesh_queue_preq(mpath, PREQ_Q_F_START);
 }
 
-static int hmc_plc_path_resolve(struct hmc_fdb_entry *fdb, const u8 *addr)
+static void hmc_plc_path_resolve(struct hmc_fdb_entry *fdb, const u8 *addr)
 {
-	struct ak60211_mesh_path *ppath;
-
 	HMC_TRACE();
 
-	ppath = hmc_ppath_lookup(addr);
-	if (CHECK_MEM(ppath)) {
-		hmc_err("Couldn't get plc path ... request preq\n");
-		plc_hmc_preq_queue(addr);
-		return -ENOMEM;
-	}
-
-	if (ppath->flags & MESH_PATH_ACTIVE) {
-		hmc_info("PLC mesh path is active!\n");
-		fdb->metric = ppath->metric;
-		fdb->sn = ppath->sn;
-		fdb->iface_id = HMC_PORT_PLC;
-		fdb->flags = ppath->flags;
-		fdb->exp_time = jiffies;
-		fdb_flush_tx_pending(fdb);
-		return 0;
-	}
-
-	if (ppath->flags & MESH_PATH_RESOLVING) {
+	if (fdb->flags & MESH_PATH_RESOLVING) {
 		hmc_info("PLC mesh path is resolving ...\n");
-		return 0;
-	} else {
-		hmc_info("Try to resolve plc mesh path\n");
-		plc_hmc_preq_queue(addr);
+		return;
 	}
 
-	return 0;
+	hmc_info("Try to resolve plc mesh path\n");
+	plc_hmc_preq_queue(addr);
 }
 
-int hmc_xmit(struct sk_buff *skb, enum hmc_port_egress egress)
+int hmc_xmit(struct sk_buff *skb, int egress)
 {
 	int ret = 0;
 
@@ -405,26 +349,26 @@ int hmc_xmit(struct sk_buff *skb, enum hmc_port_egress egress)
 
 	switch (egress) {
 	case HMC_PORT_FLOOD:
-		hmc_info("HMC_PORT_FLOOD\n");
+		hmc_dbg("HMC_PORT_FLOOD\n");
 		skb->dev = hmc->edev;
 		dev_queue_xmit(skb);
 		skb->dev = hmc->wdev;
 		dev_queue_xmit(skb);		
 		break;
 	case HMC_PORT_PLC:
-		hmc_info("HMC_PORT_PLC\n");
+		hmc_dbg("HMC_PORT_PLC\n");
 		skb->dev = hmc->edev;
 		dev_queue_xmit(skb);
 		break;
 	case HMC_PORT_WIFI:
-		hmc_info("HMC_PORT_WIFI\n");
+		hmc_dbg("HMC_PORT_WIFI\n");
 		skb->dev = hmc->wdev;
 		dev_queue_xmit(skb);
 		break;
 	case HMC_PORT_BEST:
 		//memcpy(dest, skb->data, ETH_ALEN);
 		/* TODO : forwarding based on metric */
-		hmc_info("PORT_BEST not supported yet\n");
+		hmc_dbg("PORT_BEST not supported yet\n");
 		kfree_skb(skb);
 		ret = -ENODEV;
 		break;
@@ -439,7 +383,6 @@ int hmc_xmit(struct sk_buff *skb, enum hmc_port_egress egress)
 	mutex_unlock(&hmc->xmit_mutex);
 	return ret;
 }
-EXPORT_SYMBOL(hmc_xmit);
 
 int hmc_br_tx_handler(struct sk_buff *skb)
 {
@@ -452,6 +395,8 @@ int hmc_br_tx_handler(struct sk_buff *skb)
 	hmc_print_skb(skb, "hmc_br_tx_handler");
 
 	memcpy(dest, skb->data, ETH_ALEN);
+
+	hmc_info("tx dst: %pM\n", dest);
 
 	if (!is_valid_ether_addr(dest))
 		return NF_DROP;
@@ -466,23 +411,24 @@ int hmc_br_tx_handler(struct sk_buff *skb)
 		}
 	}
 
-	if (fdb && (fdb->flags & MESH_PATH_ACTIVE)) {
-		if (!fdb_expired(fdb)) {
-			hmc_info("xmit via %d\n", fdb->iface_id);
-			//ak60211_nexthop_resolved(skb, fdb->iface_id);
-			hmc_xmit(skb, fdb->iface_id);
-			return NF_ACCEPT;
-		}
-		hmc_info("path is expired ... request to update metric\n");
-		hmc_fdb_del(dest, HMC_PORT_PLC);
-		hmc_fdb_del(dest, HMC_PORT_WIFI);
+	if (fdb->flags & MESH_PATH_ACTIVE) {
+		//if (!fdb_expired(fdb)) {
+		//	hmc_info("xmit via %d\n", fdb->iface_id);
+		//	hmc_xmit(skb, fdb->iface_id);
+		//	return NF_ACCEPT;
+		//}
+		//hmc_info("path is expired ... request to update metric\n");
+		//hmc_fdb_del(dest, HMC_PORT_PLC);
+		//hmc_fdb_del(dest, HMC_PORT_WIFI);
+		hmc_dbg("xmit via %d\n", fdb->iface_id);
+		hmc_xmit(skb, fdb->iface_id);
+		//ak60211_nexthop_resolved(skb, fdb->iface_id);
+		return NF_ACCEPT;
 	}
 
-	if (hmc_plc_path_resolve(fdb, dest) < 0)
-		hmc_err("Failed to resolve plc path\n");
+	hmc_plc_path_resolve(fdb, dest);
 
-	if (hmc_wlan_path_resolve(fdb, dest) < 0)
-		hmc_err("Failed to resolve wlan path\n");
+	hmc_wlan_path_resolve(fdb, dest);
 
 	if (skb_queue_len(&fdb->frame_queue) >= HMC_SKB_QUEUE_LEN)
 		skb_to_free = skb_dequeue(&fdb->frame_queue);
@@ -499,10 +445,17 @@ int hmc_br_tx_handler(struct sk_buff *skb)
 
 int hmc_br_rx_handler(struct sk_buff *skb)
 {
-	struct sk_buff *nskb = NULL;
 	int ret;
+	struct sk_buff *nskb = NULL;
+	//u8 dest[ETH_ALEN] = {0};
 
-	hmc_print_skb(skb, "hmc_rx_handler");
+	skb_reset_mac_header(skb);
+
+	//hmc_print_skb(skb, "hmc_rx_handler");
+
+	//memcpy(dest, skb->data, ETH_ALEN);
+
+	//hmc_info("rx dst: %pM\n", dest);
 
 	mutex_lock(&hmc->rx_mutex);
 
@@ -523,16 +476,6 @@ int hmc_br_rx_handler(struct sk_buff *skb)
 
 	return 1;
 }
-
-int hmc_get_dev_addr(u8 *addr)
-{
-	if (!addr)
-		return -1;
-
-	memcpy(addr, hmc->br_addr, ETH_ALEN);
-	return 0;
-}
-EXPORT_SYMBOL(hmc_get_dev_addr);
 
 static const struct nf_br_ops hmc_ops = {
 	.br_dev_xmit_hook =	hmc_br_tx_handler,
@@ -579,7 +522,7 @@ static void hmc_dev_release(void)
 	hmc = NULL;
 }
 
-int hmc_core_init(void)
+static int __init hmc_core_init(void)
 {
 	int ret = 0;
 
@@ -613,7 +556,6 @@ int hmc_core_init(void)
 	}
 
 	memcpy(hmc->br_addr, hmc->bdev->dev_addr, ETH_ALEN);
-	hmc_info("hmc->br_addr = %x.%x.%x.%x.%x.%x\n", hmc->br_addr[0],hmc->br_addr[1],hmc->br_addr[2], hmc->br_addr[3],hmc->br_addr[4],hmc->br_addr[5]);
 
 	spin_lock_init(&hmc->hash_lock);
 	mutex_init(&hmc->rx_mutex);
@@ -640,6 +582,12 @@ int hmc_core_init(void)
 	/* hook with bridge tx func */
 	RCU_INIT_POINTER(nf_br_ops, &hmc_ops);
 
+	ret = hmc_ops_init(hmc);
+	if (ret < 0) {
+		hmc_err("Failed to register hmc ops\n");
+		goto err;
+	}
+
 	return 0;
 
 err:
@@ -647,7 +595,7 @@ err:
 	return ret;
 }
 
-void hmc_core_exit(void)
+static void __exit hmc_core_exit(void)
 {
 	hmc_info("hybrid mesh core exit\n");
 
@@ -655,11 +603,9 @@ void hmc_core_exit(void)
 
 	RCU_INIT_POINTER(nf_br_ops, NULL);
 
-	hmc_misc_exit();
-
-	hmc_fdb_fini();
-
 	if (hmc != NULL) {
+		hmc_ops_deinit(hmc);
+
 		if (hmc->bdev)
 			dev_put(hmc->bdev);
 
@@ -672,4 +618,14 @@ void hmc_core_exit(void)
 		kfree(hmc);
 		hmc = NULL;
 	}
+
+	hmc_misc_exit();
+
+	hmc_fdb_fini();
 }
+
+module_init(hmc_core_init);
+module_exit(hmc_core_exit);
+MODULE_AUTHOR("AkiraNET");
+MODULE_DESCRIPTION("Hybrid mesh experiment");
+MODULE_LICENSE("GPL");

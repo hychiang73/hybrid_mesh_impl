@@ -141,10 +141,10 @@ void test_hmc_gen_pkt(enum hmc_port_egress egress)
 	const u8 eth_mac[ETH_ALEN] = {0x00, 0x04, 0x4b, 0xe6, 0xec, 0x3d};
 	const u8 wlan_mac[ETH_ALEN] = {0x00, 0x19, 0x94, 0x38, 0xfd, 0x8e};
 	u8 broadcast[ETH_ALEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
-	u8 sa[ETH_ALEN] = {0};
 	u8 da[ETH_ALEN] = {0};
 	u8 *pos, len = 100;
 	int i;
+	struct hmc_core *hmc = to_get_hmc();
 
 	hmc_info("test egress = %d\n", egress);
 
@@ -159,7 +159,6 @@ void test_hmc_gen_pkt(enum hmc_port_egress egress)
 		return;
 	}
 
-	hmc_get_dev_addr(sa);
 
 	new_sk = dev_alloc_skb(128);
 
@@ -169,7 +168,7 @@ void test_hmc_gen_pkt(enum hmc_port_egress egress)
 	memset(ether, 0, ETH_HLEN);
 
 	memcpy(ether->h_dest, da, ETH_ALEN);
-	memcpy(ether->h_source, sa, ETH_ALEN);
+	memcpy(ether->h_source, hmc->br_addr, ETH_ALEN);
 	ether->h_proto = ntohs(0xAA55);
 
 	pos = skb_put(new_sk, len);
@@ -259,7 +258,7 @@ static ssize_t br_hmc_proc_test_write(struct file *filp, const char *buff, size_
 		print_fdb_info(f);
 
 	} else if (strncmp(cmd, "dump_tbl", strlen(cmd)) == 0) {
-		if (hmc_fdb_dump(info, HMC_MAX_NODES) < 0) {
+		if (hmc_ops_fdb_dump(info, HMC_MAX_NODES) < 0) {
 			hmc_err("info size is overflow\n");
 			goto out;
 		}

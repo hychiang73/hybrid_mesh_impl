@@ -199,14 +199,20 @@ static void ak60211_mpath_free_rcu(struct ak60211_mesh_table *tbl,
 static void __ak60211_mpath_del(struct ak60211_mesh_table *tbl,
 				struct ak60211_mesh_path *mpath)
 {
+	struct ak60211_if_data *ifmsh = ak60211_dev_to_ifdata();
+
 	PLC_TRACE();
 
+	/* Update to HMC */
+	if (ifmsh->hmc_ops)
+		ifmsh->hmc_ops->path_update(mpath->dst, 0, 0, 0, HMC_PORT_PLC);
 	//memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
 	//plc->path->flags = 0;
 	//plc->path->sn = 0;//mpath->sn;
 	//plc->path->metric = 0;//MAX_METRIC;
 	//plc_debug("mpath del, inform br-hmc to update status\n");
 	//br_hmc_path_update(plc);
+
 
 	hlist_del_rcu(&mpath->walk_list);
 	rhashtable_remove_fast(&tbl->rhead, &mpath->rhash,
@@ -318,6 +324,10 @@ void ak60211_mpath_timer(struct timer_list *t)
 		mpath->flags &= ~(PLC_MESH_PATH_RESOLVING |
 				  PLC_MESH_PATH_RESOLVED | PLC_MESH_PATH_REQ_QUEUED);
 		mpath->exp_time = jiffies;
+
+		/* Update path to HMC */
+		if (ifmsh->hmc_ops)
+			ifmsh->hmc_ops->path_update(mpath->dst, MAX_METRIC, mpath->sn, mpath->flags, HMC_PORT_PLC);
 
 		//memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
 		//plc->path->flags = mpath->flags;
