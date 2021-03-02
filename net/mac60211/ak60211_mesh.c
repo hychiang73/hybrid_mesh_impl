@@ -595,9 +595,13 @@ int ak60211_rx_handler(struct sk_buff *pskb, struct sk_buff *nskb)
 	u16 stype, ftype;
 
 	plcbuff = (struct plc_packet_union *)skb_mac_header(skb);
-
 	if (!is_valid_ether_addr(plcbuff->sa)) {
 		/* not muitlcast or zero ether addr */
+		goto drop;
+	}
+
+	if (ether_addr_equal(plcbuff->sa, plcdev.addr)) {
+		plc_err("send by myself, drop the packet\n");
 		goto drop;
 	}
 

@@ -434,7 +434,7 @@ int hmc_br_rx_handler(struct sk_buff *skb)
 		return 1;
 	}
 
-	skb_reset_mac_header(skb);
+	//skb_reset_mac_header(skb);
 	hmc_print_skb(skb, "hmc_rx_handler");
 
 	//memcpy(dest, skb->data, ETH_ALEN);
