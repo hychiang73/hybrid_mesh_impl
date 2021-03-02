@@ -337,51 +337,31 @@ static void hmc_plc_path_resolve(struct hmc_fdb_entry *fdb, const u8 *addr)
 
 int hmc_xmit(struct sk_buff *skb, int egress)
 {
-	int ret = 0;
+	struct net_bridge *br;
+	struct net_bridge_port *p, *n;
 
 	if (CHECK_MEM(skb))
 		return -ENOMEM;
 
+	br = netdev_priv(hmc->bdev);
+
 	mutex_lock(&hmc->xmit_mutex);
 	rcu_read_lock();
 
-	hmc_print_skb(skb, "hmc_xmit");
-
-	switch (egress) {
-	case HMC_PORT_FLOOD:
-		hmc_dbg("HMC_PORT_FLOOD\n");
-		skb->dev = hmc->edev;
-		dev_queue_xmit(skb);
-		skb->dev = hmc->wdev;
-		dev_queue_xmit(skb);		
-		break;
-	case HMC_PORT_PLC:
-		hmc_dbg("HMC_PORT_PLC\n");
-		skb->dev = hmc->edev;
-		dev_queue_xmit(skb);
-		break;
-	case HMC_PORT_WIFI:
-		hmc_dbg("HMC_PORT_WIFI\n");
-		skb->dev = hmc->wdev;
-		dev_queue_xmit(skb);
-		break;
-	case HMC_PORT_BEST:
-		//memcpy(dest, skb->data, ETH_ALEN);
-		/* TODO : forwarding based on metric */
-		hmc_dbg("PORT_BEST not supported yet\n");
-		kfree_skb(skb);
-		ret = -ENODEV;
-		break;
-	default:
-		hmc_err("Unknow egress\n");
-		kfree_skb(skb);
-		ret = -EINVAL;
-		break;
+	list_for_each_entry_safe(p, n, &br->port_list, list) {
+		if (egress == HMC_PORT_FLOOD ||
+			(egress == HMC_PORT_PLC && (strncmp(p->dev->name, "eth0", strlen("eth0")) == 0)) ||
+			(egress == HMC_PORT_WIFI &&(strncmp(p->dev->name, "mesh0", strlen("mesh0")) == 0))) {
+			hmc_info("forward to %s\n", p->dev->name);
+			hmc_print_skb(skb, "hmc_xmit");
+			skb->dev = p->dev;
+			dev_queue_xmit(skb);
+		}
 	}
 
 	rcu_read_unlock();
 	mutex_unlock(&hmc->xmit_mutex);
-	return ret;
+	return 0;
 }
 
 int hmc_br_tx_handler(struct sk_buff *skb)
@@ -447,11 +427,15 @@ int hmc_br_rx_handler(struct sk_buff *skb)
 {
 	int ret;
 	struct sk_buff *nskb = NULL;
-	//u8 dest[ETH_ALEN] = {0};
+	unsigned char *source = eth_hdr(skb)->h_source;
+
+	if (ether_addr_equal(source, hmc->br_addr)) {
+		hmc_info("source address is local, ignore\n");
+		return 1;
+	}
 
 	skb_reset_mac_header(skb);
-
-	//hmc_print_skb(skb, "hmc_rx_handler");
+	hmc_print_skb(skb, "hmc_rx_handler");
 
 	//memcpy(dest, skb->data, ETH_ALEN);
 
