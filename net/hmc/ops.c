@@ -31,7 +31,8 @@ void hmc_ops_path_update(const u8 *addr, u32 metric, u32 sn, int flags, int id)
 	fdb->exp_time = jiffies;
 
 	/* clear skb queue */
-	hmc_path_update(fdb);
+	if (fdb->flags & MESH_PATH_ACTIVE)
+		hmc_path_update(fdb);
 }
 
 int hmc_ops_fdb_dump(struct nl60211_mesh_info *info, int size)

@@ -32,6 +32,7 @@
 
 #include "hmc.h"
 
+#define EN_PLC_ENCAP	0
 /* debug */
 bool hmc_debug = false;
 EXPORT_SYMBOL(hmc_debug);
@@ -68,8 +69,10 @@ static void fdb_flush_tx_pending(struct hmc_fdb_entry *fdb)
 
 	while ((skb = skb_dequeue(&fdb->frame_queue)) != NULL) {
 		skb = skb_dequeue(&fdb->frame_queue);
-		//ak60211_nexthop_resolved(skb, fdb->iface_id);
-		hmc_xmit(skb, fdb->iface_id);
+		if (fdb->iface_id == HMC_PORT_PLC && EN_PLC_ENCAP)
+			ak60211_nexthop_resolved(skb, fdb->iface_id);
+		else
+			hmc_xmit(skb, fdb->iface_id);
 	}
 }
 
@@ -401,8 +404,10 @@ int hmc_br_tx_handler(struct sk_buff *skb)
 		//hmc_fdb_del(dest, HMC_PORT_PLC);
 		//hmc_fdb_del(dest, HMC_PORT_WIFI);
 		hmc_dbg("xmit via %d\n", fdb->iface_id);
-		hmc_xmit(skb, fdb->iface_id);
-		//ak60211_nexthop_resolved(skb, fdb->iface_id);
+		if (fdb->iface_id == HMC_PORT_PLC && EN_PLC_ENCAP)
+			ak60211_nexthop_resolved(skb, fdb->iface_id);
+		else
+			hmc_xmit(skb, fdb->iface_id);
 		return NF_ACCEPT;
 	}
 
@@ -451,12 +456,6 @@ int hmc_br_rx_handler(struct sk_buff *skb)
 	/* return to br_handle_frame */
 	if (ret == NF_DROP)
 		return 0;
-	else if (ret == NF_NEW_PKTS) {
-		hmc_info("already get new pkts, send to ip layer\n");
-		//kfree(skb);
-		skb = nskb;
-		return 0;
-	}
 
 	return 1;
 }

@@ -82,8 +82,10 @@
 #define AK60211_MESH_HOUSEKEEPING_INTERVAL	(5 * HZ)
 #define MESH_PATH_EXPIRE	(600 * HZ)
 
-#define AK60211_FCTL_FTYPE		0x000c
-#define AK60211_FCTL_STYPE		0x00f0
+#define AK60211_FCTL_FTYPE			0x000c
+#define AK60211_FCTL_STYPE			0x00f0
+#define AK60211_FCTL_TODS			0x0100
+#define AK60211_FCTL_FROMDS			0x0200
 
 #define AK60211_FTYPE_MGMT			0x0000	 // 0b00
 #define AK60211_FTYPE_CTRL			0x0004	 // 0b01
@@ -97,6 +99,12 @@
 
 /* data */
 #define AK60211_STYPE_QOSDATA		0x0080	 // 0b1000
+
+/* Mesh flags */
+#define PLC_MESH_FLAGS_AE_A4 	0x1
+#define PLC_MESH_FLAGS_AE_A5_A6	0x2
+#define PLC_MESH_FLAGS_AE		0x3
+#define PLC_MESH_FLAGS_PS_DEEP	0x4
 
 enum ak60211_plink_event {
 	PLINK_UNDEFINED,
@@ -458,6 +466,13 @@ struct self_prot {
 	struct mpm_hdr		mpm_elem;
 } __packed;
 
+struct ak60211s_hdr {
+	u8 flags;
+	u8 ttl;
+	__le32 seqnum;
+	__le16 ethtype;
+} __packed;
+
 struct plc_packet_union {
 	u8	da[ETH_ALEN];
 	u8	sa[ETH_ALEN];
@@ -471,7 +486,8 @@ struct plc_packet_union {
 		struct prep_pkts	prep;
 		struct perr_pkts	perr;
 		struct self_prot	self;
-		u8 data[1520-14];
+		struct ak60211s_hdr	meshhdr;
+		u8 data[1520];
 	} un;
 };
 
