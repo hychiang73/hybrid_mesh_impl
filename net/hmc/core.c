@@ -77,7 +77,7 @@ static void fdb_flush_tx_pending(struct hmc_fdb_entry *fdb)
 		skb = skb_dequeue(&fdb->frame_queue);
 		if (fdb->iface_id == HMC_PORT_PLC && EN_PLC_ENCAP)
 			ak60211_nexthop_resolved(skb, fdb->iface_id);
-		else
+		else if (fdb->flags & MESH_PATH_ACTIVE)
 			hmc_xmit(skb, fdb->iface_id);
 	}
 }
