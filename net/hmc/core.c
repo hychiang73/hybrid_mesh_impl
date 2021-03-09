@@ -170,8 +170,6 @@ int hmc_fdb_del(const u8 *addr, u16 iface_id)
 
 	HMC_TRACE();
 
-	hmc_info("del addr = %pM", addr);
-
 	spin_lock_bh(&hmc->hash_lock);
 
 	ret = fdb_delete(addr, iface_id);
@@ -229,7 +227,7 @@ struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 		}
 	}
 	
-	hmc_dbg("p = %p, w = %p\n", plc, wlan);
+	hmc_dbg("dst = %pM, p = %p, w = %p\n", addr, plc, wlan);
 
 	if (!plc && !wlan)
 		return NULL;
@@ -238,7 +236,7 @@ struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 	else if (!wlan)
 		return plc;
 	else {
-		hmc_info("pm = %d, wm = %d\n", plc->metric, wlan->metric);
+		hmc_dbg("pm = %d, wm = %d\n", plc->metric, wlan->metric);
 		if (plc->metric <= wlan->metric)
 			return plc;
 		else

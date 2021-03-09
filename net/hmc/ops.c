@@ -56,7 +56,7 @@ void hmc_ops_wifi_path_update(u8 *proxy, u32 metric, u32 sn, int flags)
 
 void hmc_ops_plc_path_del(u8 *dst)
 {
-	hmc_info("delete dest addr : %pM", dst);
+	hmc_dbg("delete dest addr : %pM", dst);
 
 	rcu_read_lock();
 
@@ -68,7 +68,7 @@ void hmc_ops_plc_path_del(u8 *dst)
 
 void hmc_ops_plc_path_update(u8 *dst, u32 metric, u32 sn, int flags, int id)
 {
-	hmc_info("update plc dest addr: %pM\n", dst);
+	hmc_dbg("update plc dest addr: %pM\n", dst);
 
 	hmc_path_update(dst, metric, sn, flags, HMC_PORT_PLC);
 }
