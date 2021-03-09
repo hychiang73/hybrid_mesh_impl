@@ -205,7 +205,7 @@ static void __ak60211_mpath_del(struct ak60211_mesh_table *tbl,
 
 	/* Update to HMC */
 	if (ifmsh->hmc_ops)
-		ifmsh->hmc_ops->path_update(mpath->dst, 0, 0, 0, HMC_PORT_PLC);
+		ifmsh->hmc_ops->path_del(mpath->dst);
 	//memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
 	//plc->path->flags = 0;
 	//plc->path->sn = 0;//mpath->sn;

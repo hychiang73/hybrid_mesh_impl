@@ -245,6 +245,7 @@ mpp_path_lookup(struct ieee80211_sub_if_data *sdata, const u8 *dst)
 {
 	return mpath_lookup(sdata->u.mesh.mpp_paths, dst, sdata);
 }
+EXPORT_SYMBOL(mpp_path_lookup);
 
 static struct mesh_path *
 __mesh_path_lookup_by_idx(struct mesh_table *tbl, int idx)
@@ -534,7 +535,7 @@ static void __mesh_path_del(struct mesh_table *tbl, struct mesh_path *mpath)
 
 	/* Update to HMC */
 	if (ifmsh->hmc_ops)
-		ifmsh->hmc_ops->path_update(mpath->dst, 0, 0, 0, 2);
+		ifmsh->hmc_ops->path_del(mpath->dst);
 
 	hlist_del_rcu(&mpath->walk_list);
 	rhashtable_remove_fast(&tbl->rhead, &mpath->rhash, mesh_rht_params);

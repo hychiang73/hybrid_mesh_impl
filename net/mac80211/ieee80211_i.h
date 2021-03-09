@@ -644,7 +644,8 @@ struct mesh_csa_settings {
  * struct mac80211_hmc_ops - callback from mac80211 mesh to hybrid mesh core
  */
 struct mac80211_hmc_ops {
-	void (*path_update)(const u8 *addr, u32 metric, u32 sn, int flags, int id);
+	void (*path_update)(u8 *proxy, u32 metric, u32 sn, int flags);
+	void (*path_del)(u8 *proxy);
 };
 
 struct ieee80211_if_mesh {
