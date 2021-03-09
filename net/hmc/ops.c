@@ -12,27 +12,65 @@
 
 #include "hmc.h"
 
-void hmc_ops_path_update(const u8 *addr, u32 metric, u32 sn, int flags, int id)
+void hmc_ops_wifi_path_del(u8 *proxy)
 {
 	struct hmc_fdb_entry *fdb;
+	u8 dst[ETH_ALEN] = {0};
+	bool is_proxy = false;
 
-	hmc_info("update path: %pM\n", addr);
+	hmc_dbg("delete proxy addr : %pM", proxy);
 
-	fdb = hmc_fdb_insert(addr, id);
-	if (CHECK_MEM(fdb)) {
-		hmc_err("Failed to update hmc path\n");
+	rcu_read_lock();
+
+	fdb = hmc_fdb_lookup(proxy, HMC_PORT_WIFI);
+	if (!fdb) {
+		if (hmc_wpath_convert_proxy_to_dest(proxy, dst) < 0) {
+			hmc_info("Not found an appropriate dest addr, ignore");
+			rcu_read_unlock();
+			return;
+		}
+		is_proxy = true;
+	}
+
+	if (is_proxy)
+		hmc_fdb_del(dst, HMC_PORT_WIFI);
+	else
+		hmc_fdb_del(proxy, HMC_PORT_WIFI);
+
+	rcu_read_unlock();
+}
+
+void hmc_ops_wifi_path_update(u8 *proxy, u32 metric, u32 sn, int flags)
+{
+	u8 dst[ETH_ALEN] = {0};
+
+	hmc_dbg("update wifi proxy addr (%pM) to an appropriate dest addr", proxy);
+
+	if (hmc_wpath_convert_proxy_to_dest(proxy, dst) < 0) {
+		hmc_err("Not found dst in proxy tbl in wifi mesh, ignore\n");
 		return;
 	}
 
-	fdb->iface_id = id;
-	fdb->sn = sn;
-	fdb->metric = metric;
-	fdb->flags = flags;
-	fdb->exp_time = jiffies;
+	hmc_path_update(dst, metric, sn, flags, HMC_PORT_WIFI);
+}
 
-	/* clear skb queue */
-	if (fdb->flags & MESH_PATH_ACTIVE)
-		hmc_path_update(fdb);
+void hmc_ops_plc_path_del(u8 *dst)
+{
+	hmc_info("delete dest addr : %pM", dst);
+
+	rcu_read_lock();
+
+	if (hmc_fdb_del(dst, HMC_PORT_PLC) < 0)
+		hmc_err("delete %pM error in hmc tbl", dst);
+
+	rcu_read_unlock();
+}
+
+void hmc_ops_plc_path_update(u8 *dst, u32 metric, u32 sn, int flags, int id)
+{
+	hmc_info("update plc dest addr: %pM\n", dst);
+
+	hmc_path_update(dst, metric, sn, flags, HMC_PORT_PLC);
 }
 
 int hmc_ops_fdb_dump(struct nl60211_mesh_info *info, int size)
@@ -100,7 +138,7 @@ int hmc_ops_fdb_insert(const u8 *addr, u16 id)
 
 int hmc_ops_xmit(struct sk_buff *skb, int egress)
 {
-	hmc_info("xmit = (%d, %s)\n", egress, (egress == HMC_PORT_PLC) ? "PLC" : "WIFI");
+	hmc_dbg("xmit = (%d, %s)\n", egress, (egress == HMC_PORT_PLC) ? "PLC" : "WIFI");
 
 	return hmc_xmit(skb, egress);
 }
@@ -116,11 +154,13 @@ int hmc_ops_fdb_del(const u8 *addr, u16 id)
 }
 
 static const struct mac80211_hmc_ops mac_hmc_ops = {
-	.path_update = hmc_ops_path_update,
+	.path_update = hmc_ops_wifi_path_update,
+	.path_del = hmc_ops_wifi_path_del,
 };
 
 static const struct ak60211_hmc_ops ak_hmc_ops = {
-	.path_update = hmc_ops_path_update,
+	.path_update = hmc_ops_plc_path_update,
+	.path_del = hmc_ops_plc_path_del,
 	.xmit = hmc_ops_xmit,
 	.fdb_insert = hmc_ops_fdb_insert,
 	.fdb_del = hmc_ops_fdb_del,

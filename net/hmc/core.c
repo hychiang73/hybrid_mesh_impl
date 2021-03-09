@@ -32,14 +32,12 @@
 
 #include "hmc.h"
 
-#define EN_PLC_ENCAP	0
 /* debug */
 bool hmc_debug = false;
 EXPORT_SYMBOL(hmc_debug);
 
 static struct kmem_cache *hmc_fdb_cache __read_mostly;
 static u32 fdb_salt __read_mostly;
-
 struct hmc_core *hmc = NULL;
 
 struct hmc_core *to_get_hmc(void)
@@ -53,6 +51,14 @@ static inline int hmc_mac_hash(const u8 *mac, u16 iface_id)
 	u32 key = get_unaligned((u32 *)(mac + 2));
 	return jhash_2words(key, iface_id, fdb_salt) & (HMC_HASH_SIZE - 1);
 }
+
+#if 0
+static bool fdb_expired(struct hmc_fdb_entry *f)
+{
+	return (f->flags & MESH_PATH_ACTIVE) &&
+	       time_after(jiffies, f->exp_time + hmc->aging_time);
+}
+#endif
 
 static void fdb_discard_frame(struct sk_buff *skb)
 {
@@ -76,6 +82,7 @@ static void fdb_flush_tx_pending(struct hmc_fdb_entry *fdb)
 	}
 }
 
+#if 0
 static void fdb_flush_pending(struct hmc_fdb_entry *fdb)
 {
 	struct sk_buff *skb;
@@ -85,6 +92,7 @@ static void fdb_flush_pending(struct hmc_fdb_entry *fdb)
 	while ((skb = skb_dequeue(&fdb->frame_queue)) != NULL)
 		fdb_discard_frame(skb);
 }
+#endif
 
 static struct hmc_fdb_entry *fdb_find(struct hlist_head *head, const u8 *addr, u16 iface_id)
 {
@@ -109,7 +117,6 @@ static int fdb_delete(const u8 *addr, u16 iface_id)
 		return -ENOENT;
 
 	hlist_del_rcu(&fdb->hlist);
-	fdb_flush_pending(fdb);
 	kmem_cache_free(hmc_fdb_cache, fdb);
 
 	return 0;
@@ -127,7 +134,7 @@ static struct hmc_fdb_entry *fdb_create(struct hlist_head *head, const u8 *addr,
 		skb_queue_head_init(&fdb->frame_queue);
 		fdb->iface_id = iface_id;
 		fdb->sn = 0;
-		fdb->metric = 0;
+		fdb->metric = 0xffffffff;
 		fdb->flags = 0;
 		fdb->exp_time = jiffies;
 		hlist_add_head_rcu(&fdb->hlist, head);
@@ -163,6 +170,8 @@ int hmc_fdb_del(const u8 *addr, u16 iface_id)
 
 	HMC_TRACE();
 
+	hmc_info("del addr = %pM", addr);
+
 	spin_lock_bh(&hmc->hash_lock);
 
 	ret = fdb_delete(addr, iface_id);
@@ -173,17 +182,13 @@ int hmc_fdb_del(const u8 *addr, u16 iface_id)
 
 struct hmc_fdb_entry *hmc_fdb_insert(const u8 *addr, u16 iface_id)
 {
-	int id = iface_id;
 	struct hmc_fdb_entry *fdb;
 
 	HMC_TRACE();
 
-	if (id == 0)
-		id = HMC_PORT_PLC;
-
 	spin_lock_bh(&hmc->hash_lock);
 
-	fdb = fdb_insert(addr, id);
+	fdb = fdb_insert(addr, iface_id);
 
 	spin_unlock_bh(&hmc->hash_lock);
 	return fdb;
@@ -205,7 +210,7 @@ struct hmc_fdb_entry *hmc_fdb_lookup(const u8 *addr, u16 iface_id)
 
 struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 {
-	int i, cnt = 0;
+	int i;
 	struct hmc_fdb_entry *f = NULL, *plc = NULL, *wlan = NULL;
 
 	HMC_TRACE();
@@ -215,12 +220,11 @@ struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 			if (!is_valid_ether_addr(f->addr) || is_zero_ether_addr(f->addr))
 				continue;
 
-			if (f->iface_id == HMC_PORT_PLC) {
-				plc = f;
-				cnt++;
-			} else if (f->iface_id == HMC_PORT_WIFI) {
-				wlan = f;
-				cnt++;
+			if (ether_addr_equal(f->addr, addr)) {
+				if (f->iface_id == HMC_PORT_PLC)
+					plc = f;
+				else if (f->iface_id == HMC_PORT_WIFI)
+					wlan = f;
 			}
 		}
 	}
@@ -242,100 +246,201 @@ struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 	}
 }
 
-void hmc_path_update(struct hmc_fdb_entry *fdb)
+void hmc_path_update(u8 *dst, u32 metric, u32 sn, int flags, int id)
 {
-	HMC_TRACE();
+	struct hmc_fdb_entry *fdb;
+
+	fdb = hmc_fdb_insert(dst, id);
+	if (CHECK_MEM(fdb)) {
+		hmc_err("Failed to update hmc path\n");
+		return;
+	}
+
+	hmc_dbg("update dst: %pM, id: %d, sn: %d, metric: %d, flags: %d\n",
+			dst, id, sn, metric, flags);
+
+	fdb->iface_id = id;
+	fdb->sn = sn;
+	fdb->metric = metric;
+	fdb->flags = flags;
+	fdb->exp_time = jiffies;
 
 	fdb_flush_tx_pending(fdb);
 }
 
-struct mesh_path *hmc_wpath_lookup(const u8 *addr)
+int hmc_wpath_convert_proxy_to_dest(const u8 *proxy, u8 *dst)
+{
+	int ret = -1;
+	struct mesh_path *mpath;
+	struct hlist_node *n;
+	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(hmc->wdev);
+	struct mesh_table *tbl = sdata->u.mesh.mpp_paths;
+	bool spin_lock = spin_is_locked(&tbl->walk_lock);
+
+	hmc_dbg("convert proxy addr : %pM, lock = %d\n", proxy, spin_lock);
+
+	if (!spin_lock)
+		spin_lock_bh(&tbl->walk_lock);
+
+	hlist_for_each_entry_safe(mpath, n, &tbl->walk_head, walk_list) {
+		if (ether_addr_equal(mpath->mpp, proxy) &&
+					is_valid_ether_addr(mpath->dst)) {
+			memcpy(dst, mpath->dst, ETH_ALEN);
+			ret = 0;
+			goto out;
+		}
+	}
+
+out:
+	if (!spin_lock)
+		spin_unlock_bh(&tbl->walk_lock);
+
+	return ret;
+}
+
+struct mesh_path *hmc_wpath_mpp_lookup(const u8 *dst)
 {
 	struct mesh_path *mpath;
-	struct ieee80211_sub_if_data *sdata;
+	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(hmc->wdev);
 
-	HMC_TRACE();
+	rcu_read_lock();
 
-	sdata = IEEE80211_DEV_TO_SUB_IF(hmc->wdev);
-
-	if (!sdata) {
-		hmc_err("mesh priv data is null\n");
-		return NULL;
-	}
-
-	mpath = mesh_path_lookup(sdata, addr);
+	mpath = mpp_path_lookup(sdata, dst);
 	if (!mpath) {
 		hmc_err("mesh path is not found\n");
+		rcu_read_unlock();
 		return NULL;
 	}
+
+	rcu_read_unlock();
 
 	return mpath;
 }
 
-struct ak60211_mesh_path *hmc_ppath_lookup(const u8 *addr)
+struct mesh_path *hmc_wpath_lookup(const u8 *dst)
 {
-	struct ak60211_mesh_path *ppath;
-	struct ak60211_if_data *pdata;
+	struct mesh_path *mpath;
+	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(hmc->wdev);
 
-	HMC_TRACE();
+	rcu_read_lock();
 
-	pdata = ak60211_dev_to_ifdata();
-	if (!pdata) {
-		hmc_err("mesh priv data is null\n");
-		return NULL;		
-	}
-
-	ppath = ak60211_mpath_lookup(pdata, addr);
-	if (CHECK_MEM(ppath)) {
+	mpath = mesh_path_lookup(sdata, dst);
+	if (!mpath) {
 		hmc_err("mesh path is not found\n");
+		rcu_read_unlock();
 		return NULL;
 	}
 
+	rcu_read_unlock();
+
+	return mpath;
+}
+
+struct ak60211_mesh_path *hmc_ppath_lookup(const u8 *dst)
+{
+	struct ak60211_mesh_path *ppath;
+	struct ak60211_if_data *pdata = ak60211_dev_to_ifdata();
+
+	rcu_read_lock();
+
+	ppath = ak60211_mpath_lookup(pdata, dst);
+	if (CHECK_MEM(ppath)) {
+		hmc_err("mesh path is not found\n");
+		rcu_read_unlock();
+		return NULL;
+	}
+
+	rcu_read_unlock();
 	return ppath;
 }
 
-static void hmc_wlan_path_resolve(struct hmc_fdb_entry *fdb, const u8 *addr)
+static void hmc_tx_skb_queue(struct hmc_fdb_entry *fdb, struct sk_buff *skb)
 {
+	struct sk_buff *skb_to_free = NULL;
+
+	if (skb_queue_len(&fdb->frame_queue) >= HMC_SKB_QUEUE_LEN)
+		skb_to_free = skb_dequeue(&fdb->frame_queue);
+
+	skb_queue_tail(&fdb->frame_queue, skb);
+
+	if (skb_to_free)
+		fdb_discard_frame(skb_to_free);
+
+	hmc_info("Tx frame was queued\n");
+}
+
+static int hmc_wlan_path_resolve(struct sk_buff *skb, u8 *addr)
+{
+	struct mesh_path *mmpath;
 	struct mesh_path *mpath;
-	struct ieee80211_sub_if_data *sdata;
+	struct sta_info *next_hop;
+	struct hmc_fdb_entry *w_fdb;
 
-	HMC_TRACE();
-
-	if (fdb->flags & MESH_PATH_RESOLVING) {
-		hmc_info("WIFI mesh path is resolving ...\n");
-		return;
+	w_fdb = hmc_fdb_insert(addr, HMC_PORT_WIFI);
+	if (CHECK_MEM(w_fdb)) {
+		hmc_err("Failed to insert dest addr to fdb (wifi), discard frames\n");
+		fdb_discard_frame(skb);
+		goto out;
 	}
 
-	sdata = IEEE80211_DEV_TO_SUB_IF(hmc->wdev);
-	if (!sdata) {
-		hmc_err("mesh priv data is null\n");
-		return;
-	}
+	mmpath = hmc_wpath_mpp_lookup(addr);
+	if (mmpath) {
+		mpath = hmc_wpath_lookup(mmpath->mpp);
+		if (!mpath) {
+			hmc_err("Unable to resolve wifi mesh path\n");
+			goto queue;
+		}
 
-	mpath = hmc_wpath_lookup(addr);
-	if (!mpath) {
-		mpath = mesh_path_add(sdata, addr);
-		if (IS_ERR(mpath)) {
-			hmc_info("Failed to resolved wlan path\n");
-			return;
+		if (!(mpath->flags & MESH_PATH_ACTIVE)) {
+			hmc_info("wifi path isn't active ... try to resolve\n");
+			mesh_queue_preq(mpath, PREQ_Q_F_START | PREQ_Q_F_REFRESH);
+			goto queue;
+		}
+
+		next_hop = rcu_dereference(mpath->next_hop);
+		if (next_hop) {
+			hmc_info("next_hop is found, update hmc tbl\n");
+			hmc_path_update(addr, mpath->metric, mpath->sn, mpath->flags, HMC_PORT_WIFI);
+			goto out;
+		} else {
+			hmc_info("Try to resolve wifi mesh path\n");
+			mesh_queue_preq(mpath, PREQ_Q_F_START | PREQ_Q_F_REFRESH);
+			goto queue;
 		}
 	}
 
-	hmc_info("Try to resolve wifi mesh path\n");
-	mesh_queue_preq(mpath, PREQ_Q_F_START);
+queue:
+	hmc_tx_skb_queue(w_fdb, skb);
+	return NF_QUEUE;
+out:
+	return NF_ACCEPT;
 }
 
-static void hmc_plc_path_resolve(struct hmc_fdb_entry *fdb, const u8 *addr)
+static int hmc_plc_path_resolve(struct sk_buff *skb, u8 *addr)
 {
-	HMC_TRACE();
+	struct ak60211_mesh_path *ppath;
+	struct hmc_fdb_entry *p_fdb;
 
-	if (fdb->flags & MESH_PATH_RESOLVING) {
-		hmc_info("PLC mesh path is resolving ...\n");
-		return;
+	p_fdb = hmc_fdb_insert(addr, HMC_PORT_PLC);
+	if (CHECK_MEM(p_fdb)) {
+		hmc_err("Failed to insert dest addr to fdb (wifi), discard frames\n");
+		fdb_discard_frame(skb);
+		return NF_ACCEPT;
+	}
+
+	ppath = hmc_ppath_lookup(addr);
+	if (ppath) {
+		if (ppath->flags & MESH_PATH_ACTIVE) {
+			hmc_info("plc next hop is found, update hmc tbl");
+			hmc_path_update(addr, ppath->metric, ppath->sn, ppath->flags, HMC_PORT_PLC);
+			return NF_ACCEPT;
+		}
 	}
 
 	hmc_info("Try to resolve plc mesh path\n");
 	plc_hmc_preq_queue(addr);
+	hmc_tx_skb_queue(p_fdb, skb);
+	return NF_ACCEPT;
 }
 
 int hmc_xmit(struct sk_buff *skb, int egress)
@@ -355,7 +460,7 @@ int hmc_xmit(struct sk_buff *skb, int egress)
 		if (egress == HMC_PORT_FLOOD ||
 			(egress == HMC_PORT_PLC && (strncmp(p->dev->name, "eth0", strlen("eth0")) == 0)) ||
 			(egress == HMC_PORT_WIFI &&(strncmp(p->dev->name, "mesh0", strlen("mesh0")) == 0))) {
-			hmc_info("forward to %s\n", p->dev->name);
+			hmc_dbg("forward to %s\n", p->dev->name);
 			hmc_print_skb(skb, "hmc_xmit");
 			skb->dev = p->dev;
 			dev_queue_xmit(skb);
@@ -370,7 +475,6 @@ int hmc_xmit(struct sk_buff *skb, int egress)
 int hmc_br_tx_handler(struct sk_buff *skb)
 {
 	struct hmc_fdb_entry *fdb;
-	struct sk_buff *skb_to_free = NULL;
 	u8 dest[ETH_ALEN] = {0};
 
 	skb_reset_mac_header(skb);
@@ -379,53 +483,38 @@ int hmc_br_tx_handler(struct sk_buff *skb)
 
 	memcpy(dest, skb->data, ETH_ALEN);
 
-	hmc_info("tx dst: %pM\n", dest);
+	hmc_dbg("tx dst: %pM\n", dest);
 
 	if (!is_valid_ether_addr(dest))
 		return NF_DROP;
 
+	/* If the dest can't be found in hmc tbl, it will be resolved later. */
 	fdb = hmc_fdb_lookup_best(dest);
-	if (CHECK_MEM(fdb)) {
-		fdb = hmc_fdb_insert(dest, 0);
-		if (CHECK_MEM(fdb)) {
-			hmc_err("Failed to insert dest addr to fdb, discard frames\n");
-			fdb_discard_frame(skb);
+	if (fdb) {
+		hmc_dbg("xmit dst: %pM, id: %d, metric: %d, sn: %d, flags: %d, active: %d\n",
+				 fdb->addr, fdb->iface_id, fdb->metric,
+				 fdb->sn, fdb->flags, (fdb->flags & MESH_PATH_ACTIVE));
+
+		/* TODO: how does hmc recover by itself if tx is queued? */
+		//if (fdb_expired(fdb))
+		//	goto resolve;
+
+		if (fdb->flags & MESH_PATH_ACTIVE) {
+			if (fdb->iface_id == HMC_PORT_PLC && EN_PLC_ENCAP)
+				ak60211_nexthop_resolved(skb, fdb->iface_id);
+			else
+				hmc_xmit(skb, fdb->iface_id);
+
 			return NF_ACCEPT;
 		}
 	}
 
-	if (fdb->flags & MESH_PATH_ACTIVE) {
-		//if (!fdb_expired(fdb)) {
-		//	hmc_info("xmit via %d\n", fdb->iface_id);
-		//	hmc_xmit(skb, fdb->iface_id);
-		//	return NF_ACCEPT;
-		//}
-		//hmc_info("path is expired ... request to update metric\n");
-		//hmc_fdb_del(dest, HMC_PORT_PLC);
-		//hmc_fdb_del(dest, HMC_PORT_WIFI);
-		hmc_dbg("xmit via %d\n", fdb->iface_id);
-		if (fdb->iface_id == HMC_PORT_PLC && EN_PLC_ENCAP)
-			ak60211_nexthop_resolved(skb, fdb->iface_id);
-		else
-			hmc_xmit(skb, fdb->iface_id);
-		return NF_ACCEPT;
-	}
+//resolve:
 
-	hmc_plc_path_resolve(fdb, dest);
+	hmc_plc_path_resolve(skb, dest);
+	hmc_wlan_path_resolve(skb, dest);
 
-	hmc_wlan_path_resolve(fdb, dest);
-
-	if (skb_queue_len(&fdb->frame_queue) >= HMC_SKB_QUEUE_LEN)
-		skb_to_free = skb_dequeue(&fdb->frame_queue);
-
-	skb_queue_tail(&fdb->frame_queue, skb);
-
-	if (skb_to_free)
-		fdb_discard_frame(skb_to_free);
-
-	hmc_info("Tx frame was queued\n");
-
-	return NF_QUEUE;
+	return NF_ACCEPT;
 }
 
 int hmc_br_rx_handler(struct sk_buff *skb)
@@ -434,17 +523,10 @@ int hmc_br_rx_handler(struct sk_buff *skb)
 	struct sk_buff *nskb = NULL;
 	unsigned char *source = eth_hdr(skb)->h_source;
 
-	if (ether_addr_equal(source, hmc->br_addr)) {
-		hmc_info("source address is local, ignore\n");
+	if (ether_addr_equal(source, hmc->br_addr))
 		return 1;
-	}
 
-	//skb_reset_mac_header(skb);
-	hmc_print_skb(skb, "hmc_rx_handler");
-
-	//memcpy(dest, skb->data, ETH_ALEN);
-
-	//hmc_info("rx dst: %pM\n", dest);
+	//hmc_print_skb(skb, "hmc_rx_handler");
 
 	mutex_lock(&hmc->rx_mutex);
 
