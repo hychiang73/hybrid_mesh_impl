@@ -100,17 +100,19 @@ struct ak60211_if_data *ak60211_dev_to_ifdata(void)
 }
 EXPORT_SYMBOL(ak60211_dev_to_ifdata);
 
-void ak60211_pkt_hex_dump(struct sk_buff *skb, const char *type, int offset)
+void ak60211_pkt_hex_dump(struct sk_buff *pskb, const char *type, int offset)
 {
 	size_t len;
 	int rowsize = 16;
 	int i, l, linelen, remaining;
 	int li = 0;
+	struct sk_buff *skb;
 	u8 *data, ch;
 
 	if (!plc_dbg)
 		return;
 
+	skb = skb_copy(pskb, GFP_ATOMIC);
 	data = (u8 *)skb_mac_header(skb);
 
 	if (skb_is_nonlinear(skb))
@@ -119,10 +121,11 @@ void ak60211_pkt_hex_dump(struct sk_buff *skb, const char *type, int offset)
 		len = skb->len;
 
 	if (skb->data != data) {
+		plc_info("skb->data != skb->mac_header\n");
 		len += 14;
 	}
 	remaining = len + 2 + offset;
-	pr_info("Packet hex dump (len = %ld):\n", len);
+	pr_info("Packet hex dump (len = %ld, %d):\n", len, skb->data_len);
 	pr_info("============== %s ==============\n", type);
 	for (i = 0; i < len; i += rowsize) {
 		pr_info("%06d\t", li);
@@ -141,6 +144,7 @@ void ak60211_pkt_hex_dump(struct sk_buff *skb, const char *type, int offset)
 		pr_cont("\n");
 	}
 	pr_info("====================================\n");
+	kfree_skb(skb);
 }
 
 static int __must_check
@@ -458,7 +462,6 @@ void ak60211_plcto8023_unencap(struct ak60211_if_data *ifmsh, struct plc_packet_
 	struct ethhdr eth;
 	u8 *pos;
 	u32 plchdrsize;
-
 	PLC_TRACE();
 
 	rmb();
@@ -475,7 +478,6 @@ void ak60211_plcto8023_unencap(struct ak60211_if_data *ifmsh, struct plc_packet_
 
 	skb_reset_mac_header(skb);
 	skb_pull(skb, sizeof(struct ethhdr));
-
 	ak60211_pkt_hex_dump(skb, "ak60211_frame unencap(2)", 0);
 }
 
@@ -693,6 +695,7 @@ int ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 		plc_info("plc xmit successfully\n");
 		ifmsh->hmc_ops->xmit(skb, iface_id);
 	} else {
+		plc_err("plc xmit failed\n");
 		goto free;
 	}
 
@@ -775,8 +778,10 @@ int ak60211_rx_handler(struct sk_buff *pskb, struct sk_buff *nskb)
 		goto drop;
 	}
 
-	if (htons(plcbuff->ethtype) != 0xAA55)
+	if (htons(plcbuff->ethtype) != 0xAA55) {
+		ak60211_pkt_hex_dump(pskb, "ak_rx", 0);
 		goto drop;
+	}
 
 	ftype = (le16_to_cpu(plcbuff->plchdr.framectl) & AK60211_FCTL_FTYPE);
 	stype = (le16_to_cpu(plcbuff->plchdr.framectl) & AK60211_FCTL_STYPE);
