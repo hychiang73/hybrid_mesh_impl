@@ -55,6 +55,11 @@ typedef int64_t s64;
 #define STR_SETMPATH        "setmpath"
 #define STR_GETMPATH        "getmpath"
 #define STR_DUMPMPATH       "dumpmpath"
+#define STR_PLCGETMETRIC    "plcgetmetric"
+#define STR_PLCSETMETRIC    "plcsetmetric"
+#define STR_PLCSTADUMP      "plcstadump"
+#define STR_PLCGETMPARA     "plcgetmpara"
+#define STR_PLCSETMPARA     "plcsetmpara"
 //
 //ref: netlink.h
 //
@@ -63,23 +68,50 @@ typedef int64_t s64;
 #define NL60211FLAG_NO_RESPONSE 0x8000
 // nlmsg_type[7:0] is snap command enum
 enum {
-	NL60211_DEBUG = 0,     // snap debug       br0 ...
-	NL60211_GETMESHID,     // snap getmeshid   br0
-	NL60211_SETMESHID,     // snap setmeshid   br0 mymesh0
-	NL60211_RECV,          // snap recv        br0
-	NL60211_RECV_ONCE,     // snap recvonce    br0
-	NL60211_RECV_CANCEL,   // snap recvcancel  br0
-	NL60211_SEND_PLC,      // snap sendplc     br0 ff ff ff ff ff ff 00...
-	NL60211_SEND_WIFI,     // snap sendwifi    br0 ff ff ff ff ff ff 00...
-	NL60211_SEND_FLOOD,    // snap sendflood   br0 ff ff ff ff ff ff 00...
-	NL60211_SEND_BEST,     // snap sendbest    br0 ff ff ff ff ff ff 00...
-	NL60211_GETSA,         // snap getsa       br0
+	NL60211_DEBUG = 0,       // a.out debug       br0 ...
+	NL60211_GETMESHID,     // a.out getmeshid   br0
+	NL60211_SETMESHID,     // a.out setmeshid   br0 mymesh0
+	NL60211_RECV,          // a.out recv        br0 AA 66
+	NL60211_RECV_ONCE,     // a.out recvonce    br0 AA 66
+	NL60211_RECV_CANCEL,   // a.out recvcancel  br0
+	NL60211_SEND_PLC,      // a.out sendplc     br0 [da] [sa] [eth type] ...
+	NL60211_SEND_WIFI,     // a.out sendwifi    br0 [da] [sa] [eth type] ...
+	NL60211_SEND_FLOOD,    // a.out sendflood   br0 [da] [sa] [eth type] ...
+	NL60211_SEND_BEST,     // a.out sendbest    br0 [da] [sa] [eth type] ...
+	NL60211_GETSA,         // a.out getsa       br0
 
-	NL60211_ADD_MPATH,     // snap addmpath    br0 00 11 22 33 44 55
-	NL60211_DEL_MPATH,     // snap delmpath    br0 00 11 22 33 44 55
-	NL60211_SET_MPATH,     // Reserved
-	NL60211_GET_MPATH,     // snap getmpath    br0 00 11 22 33 44 55
-	NL60211_DUMP_MPATH,    // snap dumpmpath
+	NL60211_ADD_MPATH,     // a.out addmpath    br0 [da] [if]
+	NL60211_DEL_MPATH,     // a.out delmpath    br0 [da] [if]
+	NL60211_SET_MPATH,     // reserved
+	NL60211_GET_MPATH,     // a.out getmpath    br0 [da] [if]
+	NL60211_DUMP_MPATH,    // a.out dumpmpath   br0
+
+	NL60211_PLC_GET_METRIC, // a.out plcgetmetric br0 [da]
+	NL60211_PLC_SET_METRIC, // a.out plcsetmetric br0 [da] [metric]
+	NL60211_PLC_STA_DUMP,   // a.out plcstadump   br0
+	NL60211_PLC_GET_MPARA,  // a.out plcgetmpara  br0 mpara_flag
+	NL60211_PLC_SET_MPARA,  // a.out plcsetmpara  br0 mpara_flag value
+};
+
+// from private structure: ak60211_mesh_config
+struct plc_mesh_config {
+	u16 MeshRetryTimeout;
+	u16 MeshConfirmTimeout;
+	u16 MeshHoldingTimeout;
+	u16 MeshMaxPeerLinks;
+	u8 MeshMaxRetries;
+	u8 MeshTTL;
+	u8 element_ttl;
+	u8 MeshHWMPmaxPREQretries;
+	u32 path_refresh_time;
+	u16 min_discovery_timeout;
+	u32 MeshHWMPactivePathTimeout;
+	u16 MeshHWMPpreqMinInterval;
+	u16 MeshHWMPperrMinInterval;
+	u16 MeshHWMPnetDiameterTraversalTime;
+	s32 rssi_threshold;
+	u32 plink_timeout;
+	u16 beacon_interval;
 };
 
 // inside nl60211msg.buf
@@ -170,6 +202,34 @@ struct nl60211_dumpmpath_res {
 	unsigned long exp_time;
 };
 
+struct nl60211_plcgetmetric_res {
+	s32    return_code;
+	u32    metric;
+};
+
+struct nl60211_plcsetmetric_res {
+	s32    return_code;
+};
+
+// refer to struct plc_sta_info
+struct nl60211_plcstadump_res {
+	s32    return_code;
+	u8     addr[ETH_ALEN];
+	u32    plink_state;
+	u16    llid;
+	u16    plid;
+};
+
+struct nl60211_plcgetmpara_res {
+	s32    return_code;
+	u32    param_flags;
+	struct plc_mesh_config cfg;
+};
+
+struct nl60211_plcsetmpara_res {
+	s32    return_code;
+};
+
 // request
 struct nl60211_debug_req {
 	u32    len;
@@ -249,6 +309,27 @@ struct nl60211_getmpath_req {
 };
 
 struct nl60211_dumpmpath_req {
+};
+
+struct nl60211_plcgetmetric_req {
+	u8     da[ETH_ALEN];
+};
+
+struct nl60211_plcsetmetric_req {
+	u8     da[ETH_ALEN];
+	u32    metric;
+};
+
+struct nl60211_plcstadump_req {
+};
+
+struct nl60211_plcgetmpara_req {
+	u32    param_flags;
+};
+
+struct nl60211_plcsetmpara_req {
+	u32    param_flags;
+	struct plc_mesh_config cfg;
 };
 
 #define MAX_PAYLOAD 2048 /* maximum payload size for request&response */
@@ -460,6 +541,9 @@ int do_setmeshid(int argc, char **argv)
 	}
 	req = (struct nl60211_setmeshid_req *)sk_msg_send.nl_msg.buf;
 	req->id_len = strlen(argv[1]);
+	if (req->id_len > 32)
+		printf("Error: mesh id must less or equal than 32\n");
+
 	memcpy(req->id, argv[1], req->id_len);
 	req->id[req->id_len] = 0; // '\0' for the end of C string
 	printf("req->id_len = %d\n", req->id_len);
@@ -966,6 +1050,281 @@ int do_dumpmpath(int argc, char **argv)
 	return 0;
 }
 
+int do_plcgetmetric(int argc, char **argv)
+{
+	unsigned int if_idx = nametoindex(argv[0]);
+	//request
+	struct nl60211_plcgetmetric_req *req;
+	//response
+	struct nl60211msg *nlres;
+	struct nl60211_plcgetmetric_res *res;
+	int i, temp;
+
+	printf("argc = %d, if_idx = %d\n", argc, if_idx);
+	argc--;
+	argv++;
+	if (argc != ETH_ALEN)
+		printf("Error: Must input %d bytes da!", ETH_ALEN);
+
+	req = (struct nl60211_plcgetmetric_req *)sk_msg_send.nl_msg.buf;
+	for (i = 0; i < ETH_ALEN; i++) {
+		if (sscanf(argv[i], "%x", &temp) == 0) {
+			printf("Error: not a hex string!\n");
+			exit(-1);
+		}
+		req->da[i] = (uint8_t)temp;
+	}
+
+	if_nl_send(
+		NL60211_PLC_GET_METRIC,
+		if_idx,
+		sizeof(struct nl60211_plcgetmetric_req));
+
+	if_nl_recv();
+	nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
+	res = (struct nl60211_plcgetmetric_res *)nlres->buf;
+	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
+	printf("if_index    = %d\n", nlres->if_index);
+	printf("return_code = %d\n", res->return_code);
+	printf("metric      = %d\n", res->metric);
+	return 0;
+}
+
+int do_plcsetmetric(int argc, char **argv)
+{
+	unsigned int if_idx = nametoindex(argv[0]);
+	//request
+	struct nl60211_plcsetmetric_req *req;
+	//response
+	struct nl60211msg *nlres;
+	struct nl60211_plcsetmetric_res *res;
+	int i;
+	u32 temp;
+
+	printf("argc = %d, if_idx = %d\n", argc, if_idx);
+	argc--;
+	argv++;
+	if (argc != ETH_ALEN + 1)
+		printf("Error: Must input %d bytes da! and 1 byte metric",
+			ETH_ALEN);
+
+	req = (struct nl60211_plcsetmetric_req *)sk_msg_send.nl_msg.buf;
+	for (i = 0; i < ETH_ALEN; i++) {
+		if (sscanf(argv[i], "%x", &temp) == 0) {
+			printf("Error: not a hex string!\n");
+			exit(-1);
+		}
+		req->da[i] = (uint8_t)temp;
+	}
+	if (sscanf(argv[i], "%u", &temp) == 0) {
+		printf("Error: not a decimal string!\n");
+		exit(-1);
+	}
+	req->metric = temp;
+
+	if_nl_send(
+		NL60211_PLC_SET_METRIC,
+		if_idx,
+		sizeof(struct nl60211_plcsetmetric_req));
+
+	if_nl_recv();
+	nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
+	res = (struct nl60211_plcsetmetric_res *)nlres->buf;
+	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
+	printf("if_index    = %d\n", nlres->if_index);
+	printf("return_code = %d\n", res->return_code);
+	return 0;
+}
+
+int do_plcstadump(int argc, char **argv)
+{
+	unsigned int if_idx = nametoindex(argv[0]);
+	//request
+
+	//response
+	struct nl60211msg *nlres;
+	struct nl60211_plcstadump_res *res;
+	int i, temp;
+
+	if_nl_send(NL60211_PLC_STA_DUMP, if_idx, 0);
+	printf("%-21s %-10s %-10s %-10s\n",
+	       "DA", "plink_state", "llid", "plid");
+
+	while (1) {
+		if_nl_recv();
+		nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
+		res = (struct nl60211_plcstadump_res *)nlres->buf;
+		if (res->return_code < 0)
+			break;
+		//printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
+		//printf("if_index    = %d\n", nlres->if_index);
+		//printf("return_code = %d\n", res->return_code);
+		printf("%02X:%02X:%02X:%02X:%02X:%02X     ",
+		       res->addr[0], res->addr[1], res->addr[2],
+		       res->addr[3], res->addr[4], res->addr[5]);
+		printf("%-10d %-10d %-10d\n",
+		       res->plink_state, res->llid, res->plid);
+	}
+	return 0;
+}
+
+int do_plcgetmpara(int argc, char **argv)
+{
+	unsigned int if_idx = nametoindex(argv[0]);
+	//request
+	struct nl60211_plcgetmpara_req *req;
+	//response
+	struct nl60211msg *nlres;
+	struct nl60211_plcgetmpara_res *res;
+	u32 temp;
+
+	printf("argc = %d, if_idx = %d\n", argc, if_idx);
+	argc--;
+	argv++;
+	if (argc != 1) {
+		printf("Error: argument num error!\n");
+		exit(-1);
+	}
+
+	if (sscanf(argv[0], "0x%x", &temp) == 0) {
+		printf("Error: not a hexidecimal string!\n");
+		exit(-1);
+	}
+	req = (struct nl60211_plcgetmpara_req *)sk_msg_send.nl_msg.buf;
+	req->param_flags = temp;
+
+	if_nl_send(
+		NL60211_PLC_GET_MPARA,
+		if_idx,
+		sizeof(struct nl60211_plcgetmpara_req));
+
+	if_nl_recv();
+	nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
+	res = (struct nl60211_plcgetmpara_res *)nlres->buf;
+	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
+	printf("if_index    = %d\n", nlres->if_index);
+	printf("return_code = %d\n", res->return_code);
+	printf("param_flags = %d\n", res->param_flags);
+	if (res->return_code == 0) {
+		printf("%-35s = %d\n", "MeshRetryTimeout",
+			res->cfg.MeshRetryTimeout);
+		printf("%-35s = %d\n", "MeshConfirmTimeout",
+			res->cfg.MeshConfirmTimeout);
+		printf("%-35s = %d\n", "MeshHoldingTimeout",
+			res->cfg.MeshHoldingTimeout);
+		printf("%-35s = %d\n", "MeshMaxPeerLinks",
+			res->cfg.MeshMaxPeerLinks);
+		printf("%-35s = %d\n", "MeshMaxRetries",
+			res->cfg.MeshMaxRetries);
+		printf("%-35s = %d\n", "MeshTTL",
+			res->cfg.MeshTTL);
+		printf("%-35s = %d\n", "element_ttl",
+			res->cfg.element_ttl);
+		printf("%-35s = %d\n", "MeshHWMPmaxPREQretries",
+			res->cfg.MeshHWMPmaxPREQretries);
+		printf("%-35s = %d\n", "path_refresh_time",
+			res->cfg.path_refresh_time);
+		printf("%-35s = %d\n", "min_discovery_timeout",
+			res->cfg.min_discovery_timeout);
+		printf("%-35s = %d\n", "MeshHWMPactivePathTimeout",
+			res->cfg.MeshHWMPactivePathTimeout);
+		printf("%-35s = %d\n", "MeshHWMPpreqMinInterval",
+			res->cfg.MeshHWMPpreqMinInterval);
+		printf("%-35s = %d\n", "MeshHWMPperrMinInterval",
+			res->cfg.MeshHWMPperrMinInterval);
+		printf("%-35s = %d\n", "MeshHWMPnetDiameterTraversalTime",
+			res->cfg.MeshHWMPnetDiameterTraversalTime);
+		printf("%-35s = %d\n", "rssi_threshold",
+			res->cfg.rssi_threshold);
+		printf("%-35s = %d\n", "plink_timeout",
+			res->cfg.plink_timeout);
+		printf("%-35s = %d\n", "beacon_interval",
+			res->cfg.beacon_interval);
+	}
+	return 0;
+}
+
+int do_plcsetmpara(int argc, char **argv)
+{
+	unsigned int if_idx = nametoindex(argv[0]);
+	//request
+	struct nl60211_plcsetmpara_req *req;
+	//response
+	struct nl60211msg *nlres;
+	struct nl60211_plcsetmpara_res *res;
+	u32 temp;
+	s32 value_for_set;
+	u32 mask = 0x00000001;
+
+	printf("argc = %d, if_idx = %d\n", argc, if_idx);
+	argc--;
+	argv++;
+	if (argc != 2) {
+		printf("Error: argument num error!\n");
+		exit(-1);
+	}
+
+	req = (struct nl60211_plcsetmpara_req *)sk_msg_send.nl_msg.buf;
+	if (sscanf(argv[0], "0x%x", &temp) == 0) {
+		printf("Error: not a hexidecimal string!\n");
+		exit(-1);
+	}
+	req->param_flags = temp;
+	if (sscanf(argv[0], "%d", &value_for_set) == 0) {
+		printf("Error: not a decimal string!\n");
+		exit(-1);
+	}
+	memset(&req->cfg, 0, sizeof(req->cfg));
+
+	if (req->param_flags & mask)
+		req->cfg.MeshRetryTimeout = (u16)value_for_set;
+	if (req->param_flags & (mask <<= 1))
+		req->cfg.MeshConfirmTimeout = (u16)value_for_set;
+	if (req->param_flags & (mask <<= 1))
+		req->cfg.MeshHoldingTimeout = (u16)value_for_set;
+	if (req->param_flags & (mask <<= 1))
+		req->cfg.MeshMaxPeerLinks = (u16)value_for_set;
+	if (req->param_flags & (mask <<= 1))
+		req->cfg.MeshMaxRetries = (u8)value_for_set;
+	if (req->param_flags & (mask <<= 1))
+		req->cfg.MeshTTL = (u8)value_for_set;
+	if (req->param_flags & (mask <<= 1))
+		req->cfg.element_ttl = (u8)value_for_set;
+	if (req->param_flags & (mask <<= 1))
+		req->cfg.MeshHWMPmaxPREQretries = (u8)value_for_set;
+	if (req->param_flags & (mask <<= 1))
+		req->cfg.path_refresh_time = (u32)value_for_set;
+	if (req->param_flags & (mask <<= 1))
+		req->cfg.min_discovery_timeout = (u16)value_for_set;
+	if (req->param_flags & (mask <<= 1))
+		req->cfg.MeshHWMPactivePathTimeout = (u32)value_for_set;
+	if (req->param_flags & (mask <<= 1))
+		req->cfg.MeshHWMPpreqMinInterval = (u16)value_for_set;
+	if (req->param_flags & (mask <<= 1))
+		req->cfg.MeshHWMPperrMinInterval = (u16)value_for_set;
+	if (req->param_flags & (mask <<= 1))
+		req->cfg.MeshHWMPnetDiameterTraversalTime = (u16)value_for_set;
+	if (req->param_flags & (mask <<= 1))
+		req->cfg.rssi_threshold = (s32)value_for_set;
+	if (req->param_flags & (mask <<= 1))
+		req->cfg.plink_timeout = (u32)value_for_set;
+	if (req->param_flags & (mask <<= 1))
+		req->cfg.beacon_interval = (u16)value_for_set;
+
+	if_nl_send(
+		NL60211_PLC_SET_MPARA,
+		if_idx,
+		sizeof(struct nl60211_plcsetmpara_req));
+
+	if_nl_recv();
+	nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
+	res = (struct nl60211_plcsetmpara_res *)nlres->buf;
+	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
+	printf("if_index    = %d\n", nlres->if_index);
+	printf("return_code = %d\n", res->return_code);
+	return 0;
+}
+
 static const struct cmd {
 	const char *cmd;
 	int (*func)(int argc, char **argv);
@@ -986,6 +1345,11 @@ static const struct cmd {
 	{ STR_SETMPATH,     do_setmpath },
 	{ STR_GETMPATH,     do_getmpath },
 	{ STR_DUMPMPATH,    do_dumpmpath },
+	{ STR_PLCGETMETRIC, do_plcgetmetric },
+	{ STR_PLCSETMETRIC, do_plcsetmetric },
+	{ STR_PLCSTADUMP,   do_plcstadump },
+	{ STR_PLCGETMPARA,  do_plcgetmpara },
+	{ STR_PLCSETMPARA,  do_plcsetmpara },
 	{ 0 }
 };
 
