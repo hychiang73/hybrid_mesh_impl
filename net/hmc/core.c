@@ -77,7 +77,7 @@ static void fdb_flush_tx_pending(struct hmc_fdb_entry *fdb)
 		skb = skb_dequeue(&fdb->frame_queue);
 		if (fdb->iface_id == HMC_PORT_PLC && EN_PLC_ENCAP)
 			ak60211_nexthop_resolved(skb, fdb->iface_id);
-		else if (fdb->flags & MESH_PATH_ACTIVE)
+		else// if (fdb->flags & MESH_PATH_ACTIVE)
 			hmc_xmit(skb, fdb->iface_id);
 	}
 }
@@ -247,10 +247,12 @@ struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 void hmc_path_update(u8 *dst, u32 metric, u32 sn, int flags, int id)
 {
 	struct hmc_fdb_entry *fdb;
+	mutex_lock(&hmc->rx_mutex);
 
 	fdb = hmc_fdb_insert(dst, id);
 	if (CHECK_MEM(fdb)) {
 		hmc_err("Failed to update hmc path\n");
+		mutex_unlock(&hmc->rx_mutex);
 		return;
 	}
 
@@ -263,7 +265,10 @@ void hmc_path_update(u8 *dst, u32 metric, u32 sn, int flags, int id)
 	fdb->flags = flags;
 	fdb->exp_time = jiffies;
 
-	fdb_flush_tx_pending(fdb);
+	/*if (fdb->flags & MESH_PATH_ACTIVE)
+		fdb_flush_tx_pending(fdb);*/
+
+	mutex_unlock(&hmc->rx_mutex);
 }
 
 int hmc_wpath_convert_proxy_to_dest(const u8 *proxy, u8 *dst)
@@ -510,6 +515,7 @@ int hmc_br_tx_handler(struct sk_buff *skb)
 //resolve:
 
 	hmc_plc_path_resolve(skb, dest);
+
 	hmc_wlan_path_resolve(skb, dest);
 
 	return NF_ACCEPT;
@@ -526,12 +532,12 @@ int hmc_br_rx_handler(struct sk_buff *skb)
 
 	//hmc_print_skb(skb, "hmc_rx_handler");
 
-	mutex_lock(&hmc->rx_mutex);
+	//mutex_lock(&hmc->rx_mutex);
 
 	/* SNAP data might be inside 802.3 frames even if coming from wifi egress. */
 	ret = plc_hmc_rx(skb, nskb);
 
-	mutex_unlock(&hmc->rx_mutex);
+	//mutex_unlock(&hmc->rx_mutex);
 
 	/* return to br_handle_frame */
 	if (ret == NF_DROP)
