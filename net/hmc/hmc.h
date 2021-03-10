@@ -99,11 +99,13 @@ struct hmc_core {
 int hmc_wpath_convert_proxy_to_dest(const u8 *proxy, u8 *dst);
 struct mesh_path *hmc_wpath_lookup(const u8 *addr);
 struct mesh_path *hmc_wpath_mpp_lookup(const u8 *dst);
+struct mesh_path *hmc_wpath_add(const u8 *dst);
 struct ak60211_mesh_path *hmc_ppath_lookup(const u8 *addr);
 struct hmc_fdb_entry *hmc_fdb_insert(const u8 *addr, u16 iface_id);
 struct hmc_fdb_entry *hmc_fdb_lookup(const u8 *addr, u16 iface_id);
 struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr);
 void hmc_path_update(u8 *dst, u32 metric, u32 sn, int flags, int id);
+void hmc_wpath_update(u8 *dst, u32 metric, u32 sn, int flags, int id);
 int hmc_fdb_del(const u8 *addr, u16 iface_id);
 int hmc_xmit(struct sk_buff *skb, int egress);
 struct hmc_core *to_get_hmc(void);

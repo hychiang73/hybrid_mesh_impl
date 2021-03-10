@@ -51,7 +51,7 @@ void hmc_ops_wifi_path_update(u8 *proxy, u32 metric, u32 sn, int flags)
 		return;
 	}
 
-	hmc_path_update(dst, metric, sn, flags, HMC_PORT_WIFI);
+	hmc_wpath_update(dst, metric, sn, flags, HMC_PORT_WIFI);
 }
 
 void hmc_ops_plc_path_del(u8 *dst)

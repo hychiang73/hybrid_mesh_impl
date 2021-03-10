@@ -322,7 +322,8 @@ static ssize_t br_hmc_proc_test_write(struct file *filp, const char *buff, size_
 		}
 		print_ppath_info(ppath);
 		ppath->metric = data[i+1];
-		hmc_info("modified metric = %d\n", ppath->metric);
+		hmc_info("modified da = %pM, metric = %d\n", da, ppath->metric);
+		hmc_path_update(da, ppath->metric, ppath->sn, ppath->flags, HMC_PORT_PLC);
 	}
 
 out:
