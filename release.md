@@ -1,3 +1,9 @@
+* v0.3
+  * [HMC] Rewrite hybrid mesh architecture
+  * [HMC] Able to switch plc/wifi egress by its metric dynamactically
+  * [NL60211] update commands and PLC commands
+  * [AK60211] Add new option EN_PLC_ENCAP to enable plc header(default 0)
+---
 * v0.2
   * Path will be established when transmitting frames with unicast
   * Add plc mesh forwarding feature
