@@ -207,23 +207,3 @@ void plc_set_meshid(u8 *mesh_id, size_t mesh_id_len)
 	memcpy(plcdev->mesh_id, mesh_id, mesh_id_len);
 }
 
-void plc_sta_dump(struct plc_sta_info **infos, size_t *info_num)
-{
-	struct ak60211_if_data *plcdev = ak60211_dev_to_ifdata();
-	struct ak60211_sta_info *sta, *tmp;
-	size_t i = 0;
-
-	mutex_lock(&plcdev->sta_mtx);
-
-	list_for_each_entry_safe(sta, tmp, &plcdev->sta_list, list) {
-		infos[i]->plink_state = (u32)sta->plink_state;
-		infos[i]->llid = sta->llid;
-		infos[i]->plid = sta->plid;
-		memcpy(infos[i]->addr, sta->addr, sizeof(sta->addr));
-		i++;
-		if (i >= 32)
-			break;
-	}
-	mutex_unlock(&plcdev->sta_mtx);
-	*info_num = i;
-}
