@@ -21,7 +21,6 @@
 #include <linux/export.h>
 #include <linux/rculist.h>
 #include "br_private.h"
-#include "br_hmc.h"
 
 /* Hook for brouter */
 br_should_route_hook_t __rcu *br_should_route_hook __read_mostly;

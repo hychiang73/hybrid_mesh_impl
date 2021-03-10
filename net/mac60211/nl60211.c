@@ -2,7 +2,9 @@
 
 #if IN_JETSON
 #include "nl60211.h"
-#include "../bridge/br_hmc.h"
+#include "../hmc/hmc.h"
+#include "mac60211.h"
+#include "ak60211_mesh_private.h"
 #endif
 
 #include <linux/module.h>
@@ -18,23 +20,51 @@
 #define NL60211FLAG_NO_RESPONSE 0x8000
 // nlmsg_type[7:0] is snap command enum
 enum {
-	NL60211_DEBUG = 0,     // snap debug       br0 ...
-	NL60211_GETMESHID,     // snap getmeshid   br0
-	NL60211_SETMESHID,     // snap setmeshid   br0 mymesh0
-	NL60211_RECV,          // snap recv        br0
-	NL60211_RECV_ONCE,     // snap recvonce    br0
-	NL60211_RECV_CANCEL,   // snap recvcancel  br0
-	NL60211_SEND_PLC,      // snap sendplc     br0 ff ff ff ff ff ff 11...
-	NL60211_SEND_WIFI,     // snap sendwifi    br0 ff ff ff ff ff ff 11...
-	NL60211_SEND_FLOOD,    // snap sendflood   br0 ff ff ff ff ff ff 11...
-	NL60211_SEND_BEST,     // snap sendbest    br0 ff ff ff ff ff ff 11...
-	NL60211_GETSA,         // snap getsa       br0
+	NL60211_DEBUG = 0,     // a.out debug       br0 ...
+	NL60211_GETMESHID,     // a.out getmeshid   br0
+	NL60211_SETMESHID,     // a.out setmeshid   br0 mymesh0
+	NL60211_RECV,          // a.out recv        br0 AA 66
+	NL60211_RECV_ONCE,     // a.out recvonce    br0 AA 66
+	NL60211_RECV_CANCEL,   // a.out recvcancel  br0
+	NL60211_SEND_PLC,      // a.out sendplc     br0 [da] [sa] [eth type] ...
+	NL60211_SEND_WIFI,     // a.out sendwifi    br0 [da] [sa] [eth type] ...
+	NL60211_SEND_FLOOD,    // a.out sendflood   br0 [da] [sa] [eth type] ...
+	NL60211_SEND_BEST,     // a.out sendbest    br0 [da] [sa] [eth type] ...
+	NL60211_GETSA,         // a.out getsa       br0
 
-	NL60211_ADD_MPATH,
-	NL60211_DEL_MPATH,
-	NL60211_SET_MPATH,
-	NL60211_GET_MPATH,
-	NL60211_DUMP_MPATH,
+	NL60211_ADD_MPATH,     // a.out addmpath    br0 [da] [if]
+	NL60211_DEL_MPATH,     // a.out delmpath    br0 [da] [if]
+	NL60211_SET_MPATH,     // reserved
+	NL60211_GET_MPATH,     // a.out getmpath    br0 [da] [if]
+	NL60211_DUMP_MPATH,    // a.out dumpmpath   br0
+
+	NL60211_PLC_GET_METRIC, // a.out plcgetmetric br0 [da]
+	NL60211_PLC_SET_METRIC, // a.out plcsetmetric br0 [da] [metric]
+	NL60211_PLC_GET_MPARA,  // a.out plcgetmpara  br0 mpara_flag
+	NL60211_PLC_SET_MPARA,  // a.out plcsetmpara  br0 mpara_flag value
+	NL60211_PLC_DUMP_STA,   // a.out plcdumpsta   br0
+	NL60211_PLC_DUMP_MPATH, // a.out plcdumpmpath br0
+};
+
+// from private structure: ak60211_mesh_config
+struct plc_mesh_config {
+	u16 MeshRetryTimeout;
+	u16 MeshConfirmTimeout;
+	u16 MeshHoldingTimeout;
+	u16 MeshMaxPeerLinks;
+	u8 MeshMaxRetries;
+	u8 MeshTTL;
+	u8 element_ttl;
+	u8 MeshHWMPmaxPREQretries;
+	u32 path_refresh_time;
+	u16 min_discovery_timeout;
+	u32 MeshHWMPactivePathTimeout;
+	u16 MeshHWMPpreqMinInterval;
+	u16 MeshHWMPperrMinInterval;
+	u16 MeshHWMPnetDiameterTraversalTime;
+	s32 rssi_threshold;
+	u32 plink_timeout;
+	u16 beacon_interval;
 };
 
 // inside nl60211msg.buf
@@ -108,19 +138,63 @@ struct nl60211_setmpath_res {
 struct nl60211_getmpath_res {
 	s32    return_code;
 	u8     da[ETH_ALEN];
+	u16    iface_id;
 	u32    sn;
 	u32    metric;
 	u32    flags;
-	u32    egress;
+	unsigned long exp_time;
 };
 
 struct nl60211_dumpmpath_res {
 	s32    return_code;
 	u8     da[ETH_ALEN];
+	u16    iface_id;
 	u32    sn;
 	u32    metric;
 	u32    flags;
-	u32    egress;
+	unsigned long exp_time;
+};
+
+struct nl60211_plcgetmetric_res {
+	s32    return_code;
+	u32    metric;
+};
+
+struct nl60211_plcsetmetric_res {
+	s32    return_code;
+};
+
+struct nl60211_plcgetmpara_res {
+	s32    return_code;
+	u32    param_flags;
+	struct plc_mesh_config cfg;
+};
+
+struct nl60211_plcsetmpara_res {
+	s32    return_code;
+};
+
+struct nl60211_plcdumpsta_res {
+	s32    return_code;
+	u8     addr[ETH_ALEN];
+	u32    plink_state;
+	u16    llid;
+	u16    plid;
+};
+
+// ref: struct ak60211_mesh_path
+struct nl60211_plcdumpmpath_res {
+	s32    return_code;
+	u8     da[ETH_ALEN];
+	u8     next_hop[ETH_ALEN];
+	u32    sn;
+	u32    metric;
+	u8     hop_count;
+	unsigned long exp_time;
+	u32    discovery_timeout;
+	u8     discovery_retries;
+	u32    flags;
+	u32    is_root;
 };
 
 // request
@@ -185,10 +259,12 @@ struct nl60211_getsa_req {
 
 struct nl60211_addmpath_req {
 	u8     da[ETH_ALEN];
+	u16    iface_id;
 };
 
 struct nl60211_delmpath_req {
 	u8     da[ETH_ALEN];
+	u16    iface_id;
 };
 
 struct nl60211_setmpath_req {
@@ -196,9 +272,34 @@ struct nl60211_setmpath_req {
 
 struct nl60211_getmpath_req {
 	u8     da[ETH_ALEN];
+	u16    iface_id;
 };
 
 struct nl60211_dumpmpath_req {
+};
+
+struct nl60211_plcgetmetric_req {
+	u8     da[ETH_ALEN];
+};
+
+struct nl60211_plcsetmetric_req {
+	u8     da[ETH_ALEN];
+	u32    metric;
+};
+
+struct nl60211_plcgetmpara_req {
+	u32    param_flags;
+};
+
+struct nl60211_plcsetmpara_req {
+	u32    param_flags;
+	struct plc_mesh_config cfg;
+};
+
+struct nl60211_plcdumpsta_req {
+};
+
+struct nl60211_plcdumpmpath_req {
 };
 
 #define MAX_PAYLOAD 2048 /* maximum payload size for request&response */
@@ -213,9 +314,6 @@ struct nl60211msg {
 	// netlink payload end
 };
 
-#if IN_JETSON
-struct net_bridge_hmc *snap;
-#endif
 void test_hmc_gen_pkt_snap(
 	unsigned int total_len,
 	unsigned char *raw,
@@ -226,12 +324,17 @@ void test_hmc_gen_pkt_snap(
 	unsigned int proto = 0xAA66;
 	struct sk_buff *new_sk;
 	struct ethhdr *ether;
+	struct ak60211_if_data *pdata = ak60211_dev_to_ifdata();
 	//const u8 da[ETH_ALEN] = {0x00,0x04,0x4b,0xe6,0xec,0x3d};
 	//const u8 da[ETH_ALEN] = {0x00,0x19,0x94,0x38,0xfd,0x8e};
 	//const u8 sa[ETH_ALEN] = {0x00,0x04,0x4b,0xec,0x28,0x3b};
 	u8 da[ETH_ALEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 	u8 sa[ETH_ALEN] = {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff};
 	u8 *pos;
+	int egress = -1;
+
+	if (!pdata->hmc_ops)
+		return;
 
 	for (i = 0; i < total_len; i++) {
 		if (i < 6) {
@@ -285,38 +388,54 @@ void test_hmc_gen_pkt_snap(
 
 	skb_reset_mac_header(new_sk);
 
-	br_hmc_print_skb(new_sk, "test_hmc_gen_pkt_snap", 0);
+	//hmc_print_skb(new_sk, "test_hmc_gen_pkt_snap");
 
 	switch (type) {
 	case NL60211_SEND_PLC:
-		snap->egress = HMC_PORT_PLC;
+		egress = HMC_PORT_PLC;
 		break;
 	case NL60211_SEND_WIFI:
-		snap->egress = HMC_PORT_WIFI;
+		egress = HMC_PORT_WIFI;
 		break;
 	case NL60211_SEND_FLOOD:
-		snap->egress = HMC_PORT_FLOOD;
+		egress = HMC_PORT_FLOOD;
 		break;
 	case NL60211_SEND_BEST:
-		snap->egress = HMC_PORT_FLOOD;
+		egress = HMC_PORT_FLOOD;
 		break;
 	}
 
-	br_hmc_forward(new_sk, snap);
+	pdata->hmc_ops->xmit(new_sk, egress);
 #endif
 }
 
+#define PID_OF_SENDER  nlreq->nl_msghdr.nlmsg_pid
+#define IF_INDEX       nlreq->if_index
+#define COMMAND_TYPE   nlreq->nl_msghdr.nlmsg_type
+
 static struct sock *nl_sk;
 static int pr_debug_en;
-static int pid_of_sender;
 static int pid_of_receiver;
-static unsigned int if_index;
 static unsigned int if_index_recv;
-static unsigned int command_type;
 static unsigned int command_type_recv;
 static unsigned int is_nl60211_in_recv;
 static unsigned int is_nl60211_in_recv_once;
 static unsigned char recv_ether_type[2];
+
+static void nl60211_cmd_plc_exp_time_reset(struct ak60211_if_data *ifmsh)
+{
+	struct ak60211_mesh_path *mpath;
+	struct hlist_node *n;
+	struct ak60211_mesh_table *tbl = ifmsh->mesh_paths;
+
+	spin_lock_bh(&tbl->walk_lock);
+	hlist_for_each_entry_safe(mpath, n, &tbl->walk_head, walk_list) {
+		mpath->exp_time = jiffies;
+		ifmsh->hmc_ops->path_update(mpath->dst,
+			mpath->metric, mpath->sn, mpath->flags, HMC_PORT_PLC);
+	}
+	spin_unlock_bh(&tbl->walk_lock);
+}
 
 static void nl60211_cmd_simple_response(
 	struct nl60211msg *nlreq,
@@ -346,7 +465,7 @@ static void nl60211_cmd_simple_response(
 	nlres->if_index = nlreq->if_index;
 	memcpy(nlres->buf, payload, payload_len);
 	//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
-	ret = nlmsg_unicast(nl_sk, skbres, pid_of_sender);
+	ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
 	if (ret < 0)
 		pr_info("Error while sending back to user\n");
 }
@@ -354,11 +473,12 @@ static void nl60211_cmd_simple_response(
 static void nl60211_cmd_debug_dump(struct nl60211msg *nlreq)
 {
 	pr_warn("====== SNAP DUMP ======\n");
+	pr_warn("magic number = %d\n", 125);
 	pr_warn("pr_debug_en = %d\n", pr_debug_en);
-	pr_warn("pid_of_sender = %d\n", pid_of_sender);
+	pr_warn("pid_of_sender = %d\n", PID_OF_SENDER);
 	pr_warn("pid_of_receiver = %d\n", pid_of_receiver);
-	pr_warn("if_index = %u\n", if_index);
-	pr_warn("command_type = 0x%04X\n", command_type);
+	pr_warn("if_index = %u\n", IF_INDEX);
+	pr_warn("command_type = 0x%04X\n", COMMAND_TYPE);
 	pr_warn("is_nl60211_in_recv = %u\n", is_nl60211_in_recv);
 	pr_warn("is_nl60211_in_recv_once = %u\n", is_nl60211_in_recv_once);
 	pr_warn("recv_ether_type[0] = %u\n", recv_ether_type[0]);
@@ -432,9 +552,10 @@ static void nl60211_cmd_getmeshid(struct nl60211msg *nlreq)
 	s32 return_code = 0;
 	int ret;
 	//local
-	//temp
-	char id[] = "mymesh222";
-	unsigned int id_len = strlen(id);
+	u8 id[33];
+	size_t id_len;
+
+	plc_get_meshid(id, &id_len);
 
 	//response
 	if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
@@ -464,7 +585,7 @@ static void nl60211_cmd_getmeshid(struct nl60211msg *nlreq)
 	res->id[id_len] = 0; /* char: \'0 , for C string. */
 
 	//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
-	ret = nlmsg_unicast(nl_sk, skbres, pid_of_sender);
+	ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
 
 	if (ret < 0)
 		pr_info("Error while sending back to user\n");
@@ -476,20 +597,16 @@ static void nl60211_cmd_setmeshid(struct nl60211msg *nlreq)
 	struct nl60211_setmeshid_req *req = (struct nl60211_setmeshid_req *)
 					     nlreq->buf;
 	//response
-	//struct sk_buff *skbres;
-	//struct nl60211msg *nlres;
-	//struct nl60211_setmeshid_res *res;
-	//u32 nlmsgsize;
 	struct nl60211_setmeshid_res simpleres;
 	s32 return_code = 0;
-	//int ret;
-	//local
 
 	//request
-	return_code = -100; // set mesh id is TBD
-	pr_err("id_len = %u\n", req->id_len);
-	if (req->id_len)
-		pr_err("setmeshid : %s\n", req->id);
+	if (req->id_len > 32) {
+		return_code = -1;
+	} else {
+		plc_set_meshid(req->id, req->id_len);
+		return_code = 0;
+	}
 
 	//response
 	simpleres.return_code = return_code;
@@ -506,7 +623,7 @@ static void nl60211_cmd_recv(struct nl60211msg *nlreq)
 	recv_ether_type[0] = req->ether_type[0];
 	recv_ether_type[1] = req->ether_type[1];
 	is_nl60211_in_recv = 1;
-	pid_of_receiver = pid_of_sender;
+	pid_of_receiver = PID_OF_SENDER;
 
 	pr_info("%s() start ...\n", __func__);
 
@@ -526,7 +643,7 @@ static void nl60211_cmd_recv_once(struct nl60211msg *nlreq)
 	recv_ether_type[0] = req->ether_type[0];
 	recv_ether_type[1] = req->ether_type[1];
 	is_nl60211_in_recv_once = 1;
-	pid_of_receiver = pid_of_sender;
+	pid_of_receiver = PID_OF_SENDER;
 
 	pr_info("%s() start ...\n", __func__);
 
@@ -675,6 +792,7 @@ static void nl60211_cmd_getsa(struct nl60211msg *nlreq)
 	u32 nlmsgsize;
 	s32 return_code = 0;
 	int ret;
+	struct ak60211_if_data *pdata = ak60211_dev_to_ifdata();
 	//local
 	//temp
 
@@ -701,10 +819,10 @@ static void nl60211_cmd_getsa(struct nl60211msg *nlreq)
 	res = (struct nl60211_getsa_res *)nlres->buf;
 	res->return_code = return_code;
 	res->sa_len = 6;
-	memcpy(res->sa, snap->br_addr, 6);
+	memcpy(res->sa, pdata->addr, 6);
 
 	//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
-	ret = nlmsg_unicast(nl_sk, skbres, pid_of_sender);
+	ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
 
 	if (ret < 0)
 		pr_info("Error while sending back to user\n");
@@ -715,18 +833,28 @@ static void nl60211_cmd_addmpath(struct nl60211msg *nlreq)
 	//request
 	struct nl60211_addmpath_req *req =
 		(struct nl60211_addmpath_req *)nlreq->buf;
-	struct hmc_path *mpath = br_hmc_path_add(req->da);
+	struct ak60211_if_data *pdata = ak60211_dev_to_ifdata();
+	int ret;
 	//response
-	//struct sk_buff *skbres;
-	//struct nl60211msg *nlres;
-	//struct nl60211_setmeshid_res *res;
-	//u32 nlmsgsize;
 	struct nl60211_addmpath_res simpleres;
 	s32 return_code = 0;
 
+	if (!pdata->hmc_ops)
+		return;
+
+	ret = pdata->hmc_ops->fdb_insert(req->da, req->iface_id);
+
 	//response
-	if (IS_ERR(mpath))
-		return_code = (s32)PTR_ERR(mpath);
+	if (ret < 0) {
+		return_code = 1;
+		pr_err("req->iface_id = %d\n", req->iface_id);
+		pr_err("req->da[0] = 0x%02X\n", req->da[0]);
+		pr_err("req->da[1] = 0x%02X\n", req->da[1]);
+		pr_err("req->da[2] = 0x%02X\n", req->da[2]);
+		pr_err("req->da[3] = 0x%02X\n", req->da[3]);
+		pr_err("req->da[4] = 0x%02X\n", req->da[4]);
+		pr_err("req->da[5] = 0x%02X\n", req->da[5]);
+	}
 
 	simpleres.return_code = return_code;
 	nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
@@ -738,13 +866,19 @@ static void nl60211_cmd_delmpath(struct nl60211msg *nlreq)
 	//request
 	struct nl60211_delmpath_req *req =
 		(struct nl60211_delmpath_req *)nlreq->buf;
-	int ret = br_hmc_path_del(req->da);
+	struct ak60211_if_data *pdata = ak60211_dev_to_ifdata();
+	int ret;
 	//response
 	//struct sk_buff *skbres;
 	//struct nl60211msg *nlres;
 	//struct nl60211_setmeshid_res *res;
 	//u32 nlmsgsize;
 	struct nl60211_delmpath_res simpleres;
+
+	if (!pdata->hmc_ops)
+		return;
+
+	ret = pdata->hmc_ops->fdb_del(req->da, req->iface_id);
 
 	simpleres.return_code = (s32)ret;
 	nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
@@ -760,13 +894,19 @@ static void nl60211_cmd_getmpath(struct nl60211msg *nlreq)
 	//request
 	struct nl60211_getmpath_req *req =
 		(struct nl60211_getmpath_req *)nlreq->buf;
-	struct hmc_path *mpath = br_hmc_path_lookup(req->da);
+	struct hmc_fdb_entry f;
+	struct ak60211_if_data *pdata = ak60211_dev_to_ifdata();
 	//response
 	struct sk_buff *skbres;
 	struct nl60211msg *nlres;
 	struct nl60211_getmpath_res *res;
 	u32 nlmsgsize;
 	int ret;
+
+	if (!pdata->hmc_ops)
+		return;
+
+	ret = pdata->hmc_ops->fdb_lookup(&f, req->da, req->iface_id);
 
 	//response
 	if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
@@ -789,23 +929,20 @@ static void nl60211_cmd_getmpath(struct nl60211msg *nlreq)
 	nlres->if_index = nlreq->if_index;
 
 	res = (struct nl60211_getmpath_res *)nlres->buf;
-	if (IS_ERR(mpath)) {
-		res->return_code = (s32)PTR_ERR(mpath);
+	if (ret == 0) {
+		res->return_code = 0;
+		memcpy(res->da, f.addr, ETH_ALEN);
+		res->iface_id = f.iface_id;
+		res->sn = f.sn;
+		res->metric = f.metric;
+		res->flags = (u32)f.flags;
+		res->exp_time = f.exp_time;
 	} else {
-		if (!mpath) {
-			res->return_code = -1;
-		} else {
-			res->return_code = 0;
-			res->sn = mpath->sn;
-			res->metric = mpath->metric;
-			res->flags = (u32)mpath->flags;
-			res->egress = (u32)mpath->egress;
-			memcpy(res->da, mpath->dst, ETH_ALEN);
-		}
+		res->return_code = -1;
 	}
 
 	//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
-	ret = nlmsg_unicast(nl_sk, skbres, pid_of_sender);
+	ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
 
 	if (ret < 0)
 		pr_info("Error while sending back to user\n");
@@ -813,36 +950,48 @@ static void nl60211_cmd_getmpath(struct nl60211msg *nlreq)
 
 static void nl60211_cmd_dumpmpath(struct nl60211msg *nlreq)
 {
-	//struct hmc_path *br_hmc_path_lookup(const u8 *dst)
 	//request
-	struct nl60211_mesh_info info;
+	struct nl60211_mesh_info info[HMC_MAX_NODES] = {0};
+	struct ak60211_if_data *pdata = ak60211_dev_to_ifdata();
 	//response
 	struct sk_buff *skbres;
 	struct nl60211msg *nlres;
 	struct nl60211_dumpmpath_res *res;
 	u32 nlmsgsize, i = 0;
-	int ret, ret_lookup;
+	int ret, do_final_msg = 0;
 
+	if (!pdata->hmc_ops) {
+		pr_err("hmc_ops doesn't exist.\n");
+		return;
+	}
+
+	//ref: hmc_ops_fdb_dump()
+	if (pdata->hmc_ops->fdb_dump(info, HMC_MAX_NODES) < 0) {
+		pr_err("info size is overflow\n");
+		do_final_msg = 1;
+	}
+	//response
+	if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
+		return;
+	nl60211_cmd_plc_exp_time_reset(pdata);
+	nlmsgsize = sizeof(struct nl60211msg) - sizeof(nlres->buf) +
+		    sizeof(struct nl60211_dumpmpath_res);
 	while (1) {
-		ret_lookup = br_hmc_path_lookup_by_idx(&info, i);
-		//if (ret_lookup < 0) {
-			//br_hmc_err("No path dummped.\n");
-			//return;
-		//}
-		i++;
-
-		//response
-		if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
-			return;
-		nlmsgsize = sizeof(struct nl60211msg) - sizeof(nlres->buf) +
-			    sizeof(struct nl60211_dumpmpath_res);
+		if (do_final_msg == 0) {
+			if (i >= HMC_MAX_NODES) {
+				do_final_msg = 1;
+			} else {
+				if (info[i].iface_id == 0) {
+					i++;
+					continue;
+				}
+			}
+		}
 		skbres = nlmsg_new(nlmsgsize, GFP_ATOMIC);
-
 		if (!skbres) {
 			pr_err("Failed to allocate new skb\n");
 			return;
 		}
-
 		nlres = (struct nl60211msg *)nlmsg_put(skbres, 0, 0, NLMSG_DONE,
 						       nlmsgsize, 0);
 		NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
@@ -852,22 +1001,398 @@ static void nl60211_cmd_dumpmpath(struct nl60211msg *nlreq)
 		nlres->if_index = nlreq->if_index;
 
 		res = (struct nl60211_dumpmpath_res *)nlres->buf;
-		res->return_code = ret_lookup;
-		res->sn = info.sn;
-		res->metric = info.metric;
-		res->flags = (u32)info.flags;
-		res->egress = (u32)info.egress;
-		memcpy(res->da, info.dst, ETH_ALEN);
+		if (do_final_msg) {
+			res->return_code = -1;
+		} else {
+			res->return_code = 0;
+			memcpy(res->da, info[i].dst, ETH_ALEN);
+			res->iface_id = info[i].iface_id;
+			res->sn = info[i].sn;
+			res->metric = info[i].metric;
+			res->flags = (u32)info[i].flags;
+			//res->exp_time = info[i].exp_time;
+		}
 
 		//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
-		ret = nlmsg_unicast(nl_sk, skbres, pid_of_sender);
+		ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
 
 		if (ret < 0) {
 			pr_info("Error while sending back to user\n");
 			return;
 		}
-		if (ret_lookup < 0)
+
+		if (do_final_msg)
 			break;
+		i++;
+	}
+}
+
+static void nl60211_cmd_plcgetmetric(struct nl60211msg *nlreq)
+{
+	//request
+	struct nl60211_plcgetmetric_req *req =
+		(struct nl60211_plcgetmetric_req *)nlreq->buf;
+	struct ak60211_if_data *pdata = ak60211_dev_to_ifdata();
+	struct ak60211_mesh_path *mpath = NULL;
+	//response
+	struct sk_buff *skbres;
+	struct nl60211msg *nlres;
+	struct nl60211_plcgetmetric_res *res;
+	u32 nlmsgsize;
+	int ret;
+
+	//ret = pdata->hmc_ops->fdb_lookup(&f, req->da, req->iface_id);
+	mpath = ak60211_mpath_lookup(pdata, req->da);
+
+	//response
+	if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
+		return;
+	nl60211_cmd_plc_exp_time_reset(pdata);
+	nlmsgsize = sizeof(struct nl60211msg) - sizeof(nlres->buf) +
+		    sizeof(struct nl60211_plcgetmetric_res);
+	skbres = nlmsg_new(nlmsgsize, GFP_ATOMIC);
+	if (!skbres) {
+		pr_err("Failed to allocate new skb\n");
+		return;
+	}
+
+	nlres = (struct nl60211msg *)nlmsg_put(skbres, 0, 0, NLMSG_DONE,
+					       nlmsgsize, 0);
+	NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
+
+	//copy input command to response
+	nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
+	nlres->if_index = nlreq->if_index;
+
+	res = (struct nl60211_plcgetmetric_res *)nlres->buf;
+	if (mpath) {
+		res->return_code = 0;
+		res->metric = mpath->metric;
+	} else {
+		res->return_code = -1;
+	}
+
+	//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
+	ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
+
+	if (ret < 0)
+		pr_info("Error while sending back to user\n");
+}
+
+static void nl60211_cmd_plcsetmetric(struct nl60211msg *nlreq)
+{
+	//request
+	struct nl60211_plcsetmetric_req *req =
+		(struct nl60211_plcsetmetric_req *)nlreq->buf;
+	struct ak60211_if_data *pdata = ak60211_dev_to_ifdata();
+	struct ak60211_mesh_path *mpath = NULL;
+	//response
+	struct nl60211_plcsetmetric_res simpleres;
+	s32 return_code = 0;
+
+	nl60211_cmd_plc_exp_time_reset(pdata);
+	mpath = ak60211_mpath_lookup(pdata, req->da);
+
+	//request
+	if (mpath) {
+		return_code = 0;
+		mpath->metric = req->metric;
+		pdata->hmc_ops->path_update(mpath->dst,
+			mpath->metric, mpath->sn, mpath->flags, HMC_PORT_PLC);
+	} else {
+		return_code = -1;
+	}
+
+	//response
+	simpleres.return_code = return_code;
+	nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
+}
+
+static void nl60211_cmd_plcgetmpara(struct nl60211msg *nlreq)
+{
+	//request
+	struct nl60211_plcgetmpara_req *req =
+		(struct nl60211_plcgetmpara_req *)nlreq->buf;
+	struct ak60211_if_data *pdata = ak60211_dev_to_ifdata();
+	//response
+	struct sk_buff *skbres;
+	struct nl60211msg *nlres;
+	struct nl60211_plcgetmpara_res *res;
+	u32 nlmsgsize;
+	int ret;
+	s32 return_code = 0;
+
+	//response
+	if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
+		return;
+	nlmsgsize = sizeof(struct nl60211msg) - sizeof(nlres->buf) +
+		    sizeof(struct nl60211_plcgetmpara_res);
+	skbres = nlmsg_new(nlmsgsize, GFP_ATOMIC);
+	if (!skbres) {
+		pr_err("Failed to allocate new skb\n");
+		return;
+	}
+
+	nlres = (struct nl60211msg *)nlmsg_put(skbres, 0, 0, NLMSG_DONE,
+					       nlmsgsize, 0);
+	NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
+
+	//copy input command to response
+	nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
+	nlres->if_index = nlreq->if_index;
+
+	res = (struct nl60211_plcgetmpara_res *)nlres->buf;
+	res->return_code = return_code;
+	res->param_flags = req->param_flags;
+	res->cfg.MeshRetryTimeout =
+		pdata->mshcfg.MeshRetryTimeout;
+	res->cfg.MeshConfirmTimeout =
+		pdata->mshcfg.MeshConfirmTimeout;
+	res->cfg.MeshHoldingTimeout =
+		pdata->mshcfg.MeshHoldingTimeout;
+	res->cfg.MeshMaxPeerLinks =
+		pdata->mshcfg.MeshMaxPeerLinks;
+	res->cfg.MeshMaxRetries =
+		pdata->mshcfg.MeshMaxRetries;
+	res->cfg.MeshTTL =
+		pdata->mshcfg.MeshTTL;
+	res->cfg.element_ttl =
+		pdata->mshcfg.element_ttl;
+	res->cfg.MeshHWMPmaxPREQretries =
+		pdata->mshcfg.MeshHWMPmaxPREQretries;
+	res->cfg.path_refresh_time =
+		pdata->mshcfg.path_refresh_time;
+	res->cfg.min_discovery_timeout =
+		pdata->mshcfg.min_discovery_timeout;
+	res->cfg.MeshHWMPactivePathTimeout =
+		pdata->mshcfg.MeshHWMPactivePathTimeout;
+	res->cfg.MeshHWMPpreqMinInterval =
+		pdata->mshcfg.MeshHWMPpreqMinInterval;
+	res->cfg.MeshHWMPperrMinInterval =
+		pdata->mshcfg.MeshHWMPperrMinInterval;
+	res->cfg.MeshHWMPnetDiameterTraversalTime =
+		pdata->mshcfg.MeshHWMPnetDiameterTraversalTime;
+	res->cfg.rssi_threshold =
+		pdata->mshcfg.rssi_threshold;
+	res->cfg.plink_timeout =
+		pdata->mshcfg.plink_timeout;
+	res->cfg.beacon_interval =
+		pdata->mshcfg.beacon_interval;
+
+	//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
+	ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
+
+	if (ret < 0)
+		pr_info("Error while sending back to user\n");
+}
+
+static void nl60211_cmd_plcsetmpara(struct nl60211msg *nlreq)
+{
+	//request
+	struct nl60211_plcsetmpara_req *req =
+		(struct nl60211_plcsetmpara_req *)nlreq->buf;
+	struct ak60211_if_data *pdata = ak60211_dev_to_ifdata();
+	u32 mask = 0x00000001;
+	//response
+	struct nl60211_plcsetmpara_res simpleres;
+	s32 return_code = 0;
+
+	if (req->param_flags & mask)
+		pdata->mshcfg.MeshRetryTimeout =
+			req->cfg.MeshRetryTimeout;
+	if (req->param_flags & (mask <<= 1))
+		pdata->mshcfg.MeshConfirmTimeout =
+			req->cfg.MeshConfirmTimeout;
+	if (req->param_flags & (mask <<= 1))
+		pdata->mshcfg.MeshHoldingTimeout =
+			req->cfg.MeshHoldingTimeout;
+	if (req->param_flags & (mask <<= 1))
+		pdata->mshcfg.MeshMaxPeerLinks =
+			req->cfg.MeshMaxPeerLinks;
+	if (req->param_flags & (mask <<= 1))
+		pdata->mshcfg.MeshMaxRetries =
+			req->cfg.MeshMaxRetries;
+	if (req->param_flags & (mask <<= 1))
+		pdata->mshcfg.MeshTTL =
+			req->cfg.MeshTTL;
+	if (req->param_flags & (mask <<= 1))
+		pdata->mshcfg.element_ttl =
+			req->cfg.element_ttl;
+	if (req->param_flags & (mask <<= 1))
+		pdata->mshcfg.MeshHWMPmaxPREQretries =
+			req->cfg.MeshHWMPmaxPREQretries;
+	if (req->param_flags & (mask <<= 1))
+		pdata->mshcfg.path_refresh_time =
+			req->cfg.path_refresh_time;
+	if (req->param_flags & (mask <<= 1))
+		pdata->mshcfg.min_discovery_timeout =
+			req->cfg.min_discovery_timeout;
+	if (req->param_flags & (mask <<= 1))
+		pdata->mshcfg.MeshHWMPactivePathTimeout =
+			req->cfg.MeshHWMPactivePathTimeout;
+	if (req->param_flags & (mask <<= 1))
+		pdata->mshcfg.MeshHWMPpreqMinInterval =
+			req->cfg.MeshHWMPpreqMinInterval;
+	if (req->param_flags & (mask <<= 1))
+		pdata->mshcfg.MeshHWMPperrMinInterval =
+			req->cfg.MeshHWMPperrMinInterval;
+	if (req->param_flags & (mask <<= 1))
+		pdata->mshcfg.MeshHWMPnetDiameterTraversalTime =
+			req->cfg.MeshHWMPnetDiameterTraversalTime;
+	if (req->param_flags & (mask <<= 1))
+		pdata->mshcfg.rssi_threshold =
+			req->cfg.rssi_threshold;
+	if (req->param_flags & (mask <<= 1))
+		pdata->mshcfg.plink_timeout =
+			req->cfg.plink_timeout;
+	if (req->param_flags & (mask <<= 1))
+		pdata->mshcfg.beacon_interval =
+			req->cfg.beacon_interval;
+
+	//response
+	if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
+		return;
+	simpleres.return_code = return_code;
+	nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
+}
+
+static void nl60211_cmd_plcdumpsta(struct nl60211msg *nlreq)
+{
+	struct ak60211_if_data *plcdev = ak60211_dev_to_ifdata();
+	struct ak60211_sta_info *sta, *tmp;
+
+	//response
+	struct sk_buff *skbres;
+	struct nl60211msg *nlres;
+	struct nl60211_plcdumpsta_res *res;
+	u32 nlmsgsize;
+	int ret;
+
+	//response
+	if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
+		return;
+	nlmsgsize = sizeof(struct nl60211msg) - sizeof(nlres->buf) +
+		    sizeof(struct nl60211_plcdumpsta_res);
+
+	mutex_lock(&plcdev->sta_mtx);
+	list_for_each_entry_safe(sta, tmp, &plcdev->sta_list, list) {
+		skbres = nlmsg_new(nlmsgsize, GFP_ATOMIC);
+		if (!skbres) {
+			pr_err("Failed to allocate new skb\n");
+			return;
+		}
+		nlres = (struct nl60211msg *)nlmsg_put(skbres, 0, 0, NLMSG_DONE,
+						       nlmsgsize, 0);
+		NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
+		//copy input command to response
+		nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
+		nlres->if_index = nlreq->if_index;
+		res = (struct nl60211_plcdumpsta_res *)nlres->buf;
+		res->return_code = 0;
+		res->plink_state = (u32)sta->plink_state;
+		res->llid = sta->llid;
+		res->plid = sta->plid;
+		memcpy(res->addr, sta->addr, sizeof(res->addr));
+		//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
+		ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
+		if (ret < 0) {
+			pr_info("Error while sending back to user\n");
+			return;
+		}
+	}
+	mutex_unlock(&plcdev->sta_mtx);
+
+	skbres = nlmsg_new(nlmsgsize, GFP_ATOMIC);
+	if (!skbres) {
+		pr_err("Failed to allocate new skb\n");
+		return;
+	}
+	nlres = (struct nl60211msg *)nlmsg_put(skbres, 0, 0, NLMSG_DONE,
+					       nlmsgsize, 0);
+	NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
+	//copy input command to response
+	nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
+	nlres->if_index = nlreq->if_index;
+	res = (struct nl60211_plcdumpsta_res *)nlres->buf;
+	res->return_code = -1;
+	//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
+	ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
+	if (ret < 0) {
+		pr_info("Error while sending back to user\n");
+		return;
+	}
+}
+
+static void nl60211_cmd_plcdumpmpath(struct nl60211msg *nlreq)
+{
+	struct ak60211_if_data *ifmsh = ak60211_dev_to_ifdata();
+	struct ak60211_mesh_path *mpath;
+	struct hlist_node *n;
+	struct ak60211_mesh_table *tbl = ifmsh->mesh_paths;
+
+	//response
+	struct sk_buff *skbres;
+	struct nl60211msg *nlres;
+	struct nl60211_plcdumpmpath_res *res;
+	u32 nlmsgsize;
+	int ret;
+
+	//response
+	if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
+		return;
+	nl60211_cmd_plc_exp_time_reset(ifmsh);
+	nlmsgsize = sizeof(struct nl60211msg) - sizeof(nlres->buf) +
+		    sizeof(struct nl60211_plcdumpmpath_res);
+	spin_lock_bh(&tbl->walk_lock);
+	hlist_for_each_entry_safe(mpath, n, &tbl->walk_head, walk_list) {
+		skbres = nlmsg_new(nlmsgsize, GFP_ATOMIC);
+		if (!skbres) {
+			pr_err("Failed to allocate new skb\n");
+			return;
+		}
+		nlres = (struct nl60211msg *)nlmsg_put(skbres, 0, 0, NLMSG_DONE,
+						       nlmsgsize, 0);
+		NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
+		//copy input command to response
+		nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
+		nlres->if_index = nlreq->if_index;
+		res = (struct nl60211_plcdumpmpath_res *)nlres->buf;
+		res->return_code = 0;
+		memcpy(res->da, mpath->dst, ETH_ALEN);
+		memcpy(res->next_hop, mpath->next_hop->addr, ETH_ALEN);
+		res->sn = mpath->sn;
+		res->metric = mpath->metric;
+		res->hop_count = mpath->hop_count;
+		res->exp_time = mpath->exp_time;
+		res->discovery_timeout = mpath->discovery_timeout;
+		res->discovery_retries = mpath->discovery_retries;
+		res->flags = (u32)mpath->flags;
+		res->is_root = (u32)mpath->is_root;
+		ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
+		if (ret < 0) {
+			pr_info("Error while sending back to user\n");
+			return;
+		}
+	}
+	spin_unlock_bh(&tbl->walk_lock);
+
+	skbres = nlmsg_new(nlmsgsize, GFP_ATOMIC);
+	if (!skbres) {
+		pr_err("Failed to allocate new skb\n");
+		return;
+	}
+	nlres = (struct nl60211msg *)nlmsg_put(skbres, 0, 0, NLMSG_DONE,
+					       nlmsgsize, 0);
+	NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
+	//copy input command to response
+	nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
+	nlres->if_index = nlreq->if_index;
+	res = (struct nl60211_plcdumpmpath_res *)nlres->buf;
+	res->return_code = -1;
+	ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
+	if (ret < 0) {
+		pr_info("Error while sending back to user\n");
+		return;
 	}
 }
 
@@ -967,8 +1492,8 @@ static void nl60211_netlink_input(struct sk_buff *skb_in)
 	nlh = (struct nlmsghdr *)skb_in->data;
 	nlreq = (struct nl60211msg *)skb_in->data;
 
-	pr_info("\nEntering: %s\n", __func__);
 	if (pr_debug_en) {
+		pr_info("\nEntering: %s\n", __func__);
 		pr_info("skb_in: len=%d, data_len=%d, mac_len=%d\n",
 			skb_in->len, skb_in->data_len, skb_in->mac_len);
 		pr_info("skb_in          = %p\n", skb_in);
@@ -986,9 +1511,6 @@ static void nl60211_netlink_input(struct sk_buff *skb_in)
 		pr_info("if_index     = %d\n", nlreq->if_index);
 	}
 
-	pid_of_sender = nlreq->nl_msghdr.nlmsg_pid;
-	if_index = nlreq->if_index;
-	command_type = nlreq->nl_msghdr.nlmsg_type;
 	switch (nlh->nlmsg_type & 0x00FF) {
 	case NL60211_DEBUG:
 		nl60211_cmd_debug(nlreq);
@@ -1000,13 +1522,13 @@ static void nl60211_netlink_input(struct sk_buff *skb_in)
 		nl60211_cmd_setmeshid(nlreq);
 		break;
 	case NL60211_RECV:
-		if_index_recv = if_index;
-		command_type_recv = command_type;
+		if_index_recv = IF_INDEX;
+		command_type_recv = COMMAND_TYPE;
 		nl60211_cmd_recv(nlreq);
 		break;
 	case NL60211_RECV_ONCE:
-		if_index_recv = if_index;
-		command_type_recv = command_type;
+		if_index_recv = IF_INDEX;
+		command_type_recv = COMMAND_TYPE;
 		nl60211_cmd_recv_once(nlreq);
 		break;
 	case NL60211_RECV_CANCEL:
@@ -1042,8 +1564,26 @@ static void nl60211_netlink_input(struct sk_buff *skb_in)
 	case NL60211_DUMP_MPATH:
 		nl60211_cmd_dumpmpath(nlreq);
 		break;
+	case NL60211_PLC_GET_METRIC:
+		nl60211_cmd_plcgetmetric(nlreq);
+		break;
+	case NL60211_PLC_SET_METRIC:
+		nl60211_cmd_plcsetmetric(nlreq);
+		break;
+	case NL60211_PLC_GET_MPARA:
+		nl60211_cmd_plcgetmpara(nlreq);
+		break;
+	case NL60211_PLC_SET_MPARA:
+		nl60211_cmd_plcsetmpara(nlreq);
+		break;
+	case NL60211_PLC_DUMP_STA:
+		nl60211_cmd_plcdumpsta(nlreq);
+		break;
+	case NL60211_PLC_DUMP_MPATH:
+		nl60211_cmd_plcdumpmpath(nlreq);
+		break;
 	default:
-		pr_warn("[SNAP] Unknown command = %d\n", nlh->nlmsg_type);
+		pr_warn("[NL60211] Unknown command = %d\n", nlh->nlmsg_type);
 	}
 }
 
@@ -1057,10 +1597,6 @@ int test_br_hmc_rx_snap(struct sk_buff *skb)
 	nl60211_rx_callback(skb);
 	return 0;
 }
-
-static struct net_bridge_hmc_ops test_br_hmc_ops_f = {
-	.rx = test_br_hmc_rx_snap,
-};
 
 int nl60211_netlink_init(void)
 {
@@ -1076,8 +1612,6 @@ int nl60211_netlink_init(void)
 		pr_alert("Error creating socket.\n");
 		return -10;
 	}
-
-	snap = br_hmc_alloc("nl60211", &test_br_hmc_ops_f);
 
 	return 0;
 }

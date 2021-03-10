@@ -18,7 +18,7 @@
 
 #define MAX_PREQ_QUEUE_LEN	64
 
-static void mesh_queue_preq(struct mesh_path *, u8);
+//static void mesh_queue_preq(struct mesh_path *, u8);
 
 static inline u32 u32_field_get(const u8 *preq_elem, int offset, bool ae)
 {
@@ -382,6 +382,7 @@ static u32 hwmp_route_info_get(struct ieee80211_sub_if_data *sdata,
 			       const u8 *hwmp_ie, enum mpath_frame_type action)
 {
 	struct ieee80211_local *local = sdata->local;
+	struct ieee80211_if_mesh *ifmsh = &sdata->u.mesh;
 	struct mesh_path *mpath;
 	struct sta_info *sta;
 	bool fresh_info;
@@ -504,6 +505,10 @@ static u32 hwmp_route_info_get(struct ieee80211_sub_if_data *sdata,
 			/* draft says preq_id should be saved to, but there does
 			 * not seem to be any use for it, skipping by now
 			 */
+
+			/* Update path to HMC */
+			if (ifmsh->hmc_ops)
+				ifmsh->hmc_ops->path_update(mpath->dst, mpath->metric, mpath->sn, mpath->flags);
 		} else
 			spin_unlock_bh(&mpath->state_lock);
 	}
@@ -547,6 +552,9 @@ static u32 hwmp_route_info_get(struct ieee80211_sub_if_data *sdata,
 			/* init it at a low value - 0 start is tricky */
 			ewma_mesh_fail_avg_add(&sta->mesh->fail_avg, 1);
 			mesh_path_tx_pending(mpath);
+			/* Update path to HMC */
+			if (ifmsh->hmc_ops)
+				ifmsh->hmc_ops->path_update(mpath->dst, mpath->metric, mpath->sn, mpath->flags);
 		} else
 			spin_unlock_bh(&mpath->state_lock);
 	}
@@ -968,7 +976,8 @@ void mesh_rx_path_sel_frame(struct ieee80211_sub_if_data *sdata,
  * Locking: the function must be called from within a rcu read lock block.
  *
  */
-static void mesh_queue_preq(struct mesh_path *mpath, u8 flags)
+//static void mesh_queue_preq(struct mesh_path *mpath, u8 flags)
+void mesh_queue_preq(struct mesh_path *mpath, u8 flags)
 {
 	struct ieee80211_sub_if_data *sdata = mpath->sdata;
 	struct ieee80211_if_mesh *ifmsh = &sdata->u.mesh;
@@ -1020,6 +1029,7 @@ static void mesh_queue_preq(struct mesh_path *mpath, u8 flags)
 		mod_timer(&ifmsh->mesh_path_timer, ifmsh->last_preq +
 						min_preq_int_jiff(sdata));
 }
+EXPORT_SYMBOL(mesh_queue_preq);
 
 /**
  * mesh_path_start_discovery - launch a path discovery from the PREQ queue
@@ -1100,6 +1110,11 @@ void mesh_path_start_discovery(struct ieee80211_sub_if_data *sdata)
 
 	spin_unlock_bh(&mpath->state_lock);
 	da = (mpath->is_root) ? mpath->rann_snd_addr : broadcast_addr;
+
+	/* Update path to HMC */
+	if (ifmsh->hmc_ops)
+		ifmsh->hmc_ops->path_update(mpath->dst, MAX_METRIC, mpath->sn, mpath->flags);
+
 	mesh_path_sel_frame_tx(MPATH_PREQ, 0, sdata->vif.addr, ifmsh->sn,
 			       target_flags, mpath->dst, mpath->sn, da, 0,
 			       ttl, lifetime, 0, ifmsh->preq_id++, sdata);
@@ -1200,7 +1215,7 @@ int mesh_nexthop_lookup(struct ieee80211_sub_if_data *sdata,
 	    ether_addr_equal(sdata->vif.addr, hdr->addr4) &&
 	    !(mpath->flags & MESH_PATH_RESOLVING) &&
 	    !(mpath->flags & MESH_PATH_FIXED))
-		mesh_queue_preq(mpath, PREQ_Q_F_START | PREQ_Q_F_REFRESH);
+			mesh_queue_preq(mpath, PREQ_Q_F_START | PREQ_Q_F_REFRESH);
 
 	next_hop = rcu_dereference(mpath->next_hop);
 	if (next_hop) {
@@ -1217,6 +1232,7 @@ void mesh_path_timer(struct timer_list *t)
 {
 	struct mesh_path *mpath = from_timer(mpath, t, timer);
 	struct ieee80211_sub_if_data *sdata = mpath->sdata;
+	struct ieee80211_if_mesh *ifmsh = &sdata->u.mesh;
 	int ret;
 
 	if (sdata->local->quiescing)
@@ -1238,6 +1254,11 @@ void mesh_path_timer(struct timer_list *t)
 				  MESH_PATH_RESOLVED |
 				  MESH_PATH_REQ_QUEUED);
 		mpath->exp_time = jiffies;
+
+		/* Update path to HMC */
+		if (ifmsh->hmc_ops)
+			ifmsh->hmc_ops->path_update(mpath->dst, MAX_METRIC, mpath->sn, mpath->flags);
+
 		spin_unlock_bh(&mpath->state_lock);
 		if (!mpath->is_gate && mesh_gate_num(sdata) > 0) {
 			ret = mesh_path_send_to_gates(mpath);

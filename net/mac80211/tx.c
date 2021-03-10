@@ -4004,8 +4004,6 @@ void __ieee80211_subif_start_xmit(struct sk_buff *skb,
 			goto out;
 		}
 
-		hmc_print_skb(skb, "__ieee80211_subif_start_xmit after built 80211 hdr", 0);
-
 		ieee80211_tx_stats(dev, skb->len);
 
 		ieee80211_xmit(sdata, sta, skb, 0);

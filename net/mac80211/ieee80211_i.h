@@ -640,6 +640,14 @@ struct mesh_csa_settings {
 	struct cfg80211_csa_settings settings;
 };
 
+/*
+ * struct mac80211_hmc_ops - callback from mac80211 mesh to hybrid mesh core
+ */
+struct mac80211_hmc_ops {
+	void (*path_update)(u8 *proxy, u32 metric, u32 sn, int flags);
+	void (*path_del)(u8 *proxy);
+};
+
 struct ieee80211_if_mesh {
 	struct timer_list housekeeping_timer;
 	struct timer_list mesh_path_timer;
@@ -694,6 +702,7 @@ struct ieee80211_if_mesh {
 	bool user_mpm;
 	/* Extensible Synchronization Framework */
 	const struct ieee80211_mesh_sync_ops *sync_ops;
+	const struct mac80211_hmc_ops *hmc_ops;
 	s64 sync_offset_clockdrift_max;
 	spinlock_t sync_offset_lock;
 	/* mesh power save */

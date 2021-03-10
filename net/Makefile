@@ -50,6 +50,7 @@ obj-$(CONFIG_RDS)		+= rds/
 obj-$(CPTCFG_WIRELESS)		+= wireless/
 obj-$(CPTCFG_MAC80211)		+= mac80211/
 obj-$(CPTCFG_MAC60211)		+= mac60211/
+obj-y						+= hmc/
 obj-$(CONFIG_TIPC)		+= tipc/
 obj-$(CONFIG_NETLABEL)		+= netlabel/
 obj-$(CONFIG_IUCV)		+= iucv/

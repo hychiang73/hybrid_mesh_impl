@@ -238,12 +238,14 @@ mesh_path_lookup(struct ieee80211_sub_if_data *sdata, const u8 *dst)
 {
 	return mpath_lookup(sdata->u.mesh.mesh_paths, dst, sdata);
 }
+EXPORT_SYMBOL(mesh_path_lookup);
 
 struct mesh_path *
 mpp_path_lookup(struct ieee80211_sub_if_data *sdata, const u8 *dst)
 {
 	return mpath_lookup(sdata->u.mesh.mpp_paths, dst, sdata);
 }
+EXPORT_SYMBOL(mpp_path_lookup);
 
 static struct mesh_path *
 __mesh_path_lookup_by_idx(struct mesh_table *tbl, int idx)
@@ -437,6 +439,7 @@ struct mesh_path *mesh_path_add(struct ieee80211_sub_if_data *sdata,
 	sdata->u.mesh.mesh_paths_generation++;
 	return new_mpath;
 }
+EXPORT_SYMBOL(mesh_path_add);
 
 int mpp_path_add(struct ieee80211_sub_if_data *sdata,
 		 const u8 *dst, const u8 *mpp)
@@ -527,6 +530,13 @@ static void mesh_path_free_rcu(struct mesh_table *tbl,
 
 static void __mesh_path_del(struct mesh_table *tbl, struct mesh_path *mpath)
 {
+	struct ieee80211_sub_if_data *sdata = mpath->sdata;
+	struct ieee80211_if_mesh *ifmsh = &sdata->u.mesh;
+
+	/* Update to HMC */
+	if (ifmsh->hmc_ops)
+		ifmsh->hmc_ops->path_del(mpath->dst);
+
 	hlist_del_rcu(&mpath->walk_list);
 	rhashtable_remove_fast(&tbl->rhead, &mpath->rhash, mesh_rht_params);
 	mesh_path_free_rcu(tbl, mpath);

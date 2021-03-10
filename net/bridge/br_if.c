@@ -27,7 +27,6 @@
 #include <net/switchdev.h>
 
 #include "br_private.h"
-#include "br_hmc.h"
 
 /*
  * Determine initial path cost based on speed.
@@ -395,7 +394,6 @@ int br_add_bridge(struct net *net, const char *name)
 	if (res)
 		free_netdev(dev);
 
-	br_hmc_notify(HMC_ADD_BR, dev);
 	return res;
 }
 
@@ -593,8 +591,6 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 	br_set_gso_limits(br);
 
 	kobject_uevent(&p->kobj, KOBJ_ADD);
-
-	br_hmc_notify(HMC_ADD_IF, br->dev);
 
 	return 0;
 

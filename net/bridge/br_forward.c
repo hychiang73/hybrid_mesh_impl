@@ -20,7 +20,6 @@
 #include <linux/if_vlan.h>
 #include <linux/netfilter_bridge.h>
 #include "br_private.h"
-#include "br_hmc.h"
 
 /* Don't forward packets to originating port or forwarding disabled */
 static inline int should_deliver(const struct net_bridge_port *p,

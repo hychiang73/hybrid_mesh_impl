@@ -40,7 +40,7 @@
 #include <linux/skbuff.h>
 #include <linux/jiffies.h>
 
-#include "../bridge/br_private.h"
+#include "../hmc/hmc.h"
 #include "mac60211.h"
 
 #define plc_debug(fmt, arg...)							\
@@ -66,11 +66,11 @@
 #endif
 
 #define MAX_PREQ_QUEUE_LEN	64
-#define SBEACON_DELAY		2000
+#define SBEACON_DELAY		5000
 #define AK60211_MESH_HWMP_PATH_TIMEOUT	3000
 #define MAX_MESH_TTL	31
 #define MESH_TRAVERSAL_TIME  50
-#define MESH_MAX_PLINKS		16
+#define PLC_MESH_MAX_PLINKS		16
 #define MESH_MAX_PATHS	   1024
 #define MAX_METRIC	0xffffffff
 #define MSEC_TO_TU(x) ((x) * 1000 / 1024)
@@ -82,8 +82,10 @@
 #define AK60211_MESH_HOUSEKEEPING_INTERVAL	(5 * HZ)
 #define MESH_PATH_EXPIRE	(600 * HZ)
 
-#define AK60211_FCTL_FTYPE		0x000c
-#define AK60211_FCTL_STYPE		0x00f0
+#define AK60211_FCTL_FTYPE			0x000c
+#define AK60211_FCTL_STYPE			0x00f0
+#define AK60211_FCTL_TODS			0x0100
+#define AK60211_FCTL_FROMDS			0x0200
 
 #define AK60211_FTYPE_MGMT			0x0000	 // 0b00
 #define AK60211_FTYPE_CTRL			0x0004	 // 0b01
@@ -97,6 +99,12 @@
 
 /* data */
 #define AK60211_STYPE_QOSDATA		0x0080	 // 0b1000
+
+/* Mesh flags */
+#define PLC_MESH_FLAGS_AE_A4 	0x1
+#define PLC_MESH_FLAGS_AE_A5_A6	0x2
+#define PLC_MESH_FLAGS_AE		0x3
+#define PLC_MESH_FLAGS_PS_DEEP	0x4
 
 enum ak60211_plink_event {
 	PLINK_UNDEFINED,
@@ -152,7 +160,7 @@ enum ak60211_sp_actioncode {
 };
 
 enum ak60211_mesh_task_flags {
-	MESH_WORK_HOUSEKEEPING,
+	AK60211_MESH_WORK_HOUSEKEEPING,
 };
 
 static const char * const mplstates[] = {
@@ -238,6 +246,22 @@ struct ak60211_sta_info {
 	u8	addr[6];
 };
 
+struct hmc_fdb_entry;
+struct nl60211_mesh_info;
+
+/*
+ * struct ak60211_hmc_ops - callback from ak60211 mesh to hybrid mesh core
+ */
+struct ak60211_hmc_ops {
+	void (*path_update)(u8 *addr, u32 metric, u32 sn, int flags, int id);
+	void (*path_del)(u8 *dst);
+	int (*xmit)(struct sk_buff *skb, int egress);
+	int (*fdb_insert)(const u8 *addr, u16 id);
+	int (*fdb_lookup)(struct hmc_fdb_entry *f, const u8 *addr, u16 id);
+	int (*fdb_del)(const u8 *addr, u16 id);
+	int (*fdb_dump)(struct nl60211_mesh_info *info, int size);
+};
+
 struct ak60211_if_data {
 	struct timer_list housekeeping_timer;
 	struct timer_list mesh_path_timer;
@@ -253,6 +277,9 @@ struct ak60211_if_data {
 	u32 preq_id;
 	unsigned long last_sn_update;
 	u32 mesh_seqnum;
+
+	/* hmc ops */
+	const struct ak60211_hmc_ops *hmc_ops;
 
 	u8 addr[ETH_ALEN];
 	u8 mesh_id[MAX_MESH_ID_LEN];
@@ -440,6 +467,13 @@ struct self_prot {
 	struct mpm_hdr		mpm_elem;
 } __packed;
 
+struct ak60211s_hdr {
+	u8 flags;
+	u8 ttl;
+	__le32 seqnum;
+	__le16 ethtype;
+} __packed;
+
 struct plc_packet_union {
 	u8	da[ETH_ALEN];
 	u8	sa[ETH_ALEN];
@@ -453,6 +487,8 @@ struct plc_packet_union {
 		struct prep_pkts	prep;
 		struct perr_pkts	perr;
 		struct self_prot	self;
+		struct ak60211s_hdr	meshhdr;
+		u8 data[1520];
 	} un;
 };
 
@@ -478,6 +514,14 @@ static inline void ak60211_mesh_plink_fsm_restart(struct ak60211_sta_info *sta)
 	sta->llid = 0;
 	/* sta->llid = sta->plid = sta->reason = 0; */
 }
+
+static inline struct ak60211_sta_info *
+ak60211_next_hop_deref_protected(struct ak60211_mesh_path *mpath)
+{
+	return rcu_dereference_protected(mpath->next_hop,
+					 lockdep_is_held(&mpath->state_lock));
+}
+
 extern struct net_bridge_hmc *plc;
 extern bool plc_dbg;
 
@@ -493,7 +537,7 @@ struct ak60211_mesh_path *ak60211_mpath_lookup(struct ak60211_if_data *ifmsh,
 					       const u8 *dst);
 void ak60211_mesh_deinit(void);
 void ak60211_mtbl_deinit(struct ak60211_if_data *ifmsh);
-int ak60211_rx_handler(struct sk_buff *pskb);
+int ak60211_rx_handler(struct sk_buff *pskb, struct sk_buff *nskb);
 void ak60211_mesh_rx_plink_frame(struct ak60211_if_data *ifmsh,
 				 struct plc_packet_union *buff);
 void ak60211_mesh_rx_path_sel_frame(struct ak60211_if_data *ifmsh,
@@ -519,13 +563,18 @@ int ak60211_mpath_sel_frame_tx(enum ak60211_mpath_frame_type action,
 			       u8 hop_count, u8 ttl, u32 lifetime, u32 metric,
 			       u32 preq_id, struct ak60211_if_data *ifmsh);
 
-void __ak60211_mpath_queue_preq(struct ak60211_if_data *ifmsh,
-				const u8 *dst, u32 hmc_sn);
 void plc_send_beacon(void);
 void ak60211_preq_test_wq(struct work_struct *work);
-void ak60211_mpath_queue_preq_new(struct hmc_hybrid_path *hmpath);
-int __ak60211_mpath_queue_preq_new(struct ak60211_if_data *ifmsh,
-				   struct hmc_hybrid_path *hmpath, u8 flags);
+//void ak60211_mpath_queue_preq_new(struct hmc_hybrid_path *hmpath);
+//int __ak60211_mpath_queue_preq_new(struct ak60211_if_data *ifmsh,
+//				   struct hmc_hybrid_path *hmpath, u8 flags);
+int ak60211_mpath_queue_preq(const u8 *addr);
+int __ak60211_mpath_queue_preq(struct ak60211_if_data *ifmsh,
+									const u8 *dst, u8 flags);
+struct ak60211_if_data *ak60211_dev_to_ifdata(void);
+int ak60211_mesh_hmc_ops_register(const struct ak60211_hmc_ops *ops);
+void ak60211_mesh_hmc_ops_unregister(void);
+
 void ak60211_mplink_timer(struct timer_list *t);
 int ak60211_mpath_error_tx(struct ak60211_if_data *ifmsh, u8 ttl, const u8 *target,
 							u32 target_sn, u16 target_rcode, const u8 *ra);

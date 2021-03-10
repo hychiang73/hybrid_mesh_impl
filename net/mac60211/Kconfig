@@ -3,3 +3,6 @@ config MAC60211
 	tristate "AkiraNET PLC proprietary network stack including mesh (mac60211)"
 	depends on m
 
+config MAC60211_MESH
+    bool "Enable mac60211 mesh networking support"
+    depends on MAC60211

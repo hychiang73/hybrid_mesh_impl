@@ -148,6 +148,9 @@ config BACKPORTED_MAC80211
 config BACKPORTED_MAC60211
 	tristate
 	default MAC60211
+config BACKPORTED_MAC60211_MESH
+	tristate
+	default MAC60211_MESH
 config BACKPORTED_MAC80211_HAS_RC
 	tristate
 	default MAC80211_HAS_RC

@@ -1566,6 +1566,25 @@ out:
 	sdata_unlock(sdata);
 }
 
+int ieee80211_mesh_hmc_ops_register(struct ieee80211_sub_if_data *sdata, const struct mac80211_hmc_ops *ops)
+{
+	struct ieee80211_if_mesh *ifmsh = &sdata->u.mesh;
+
+	if (!ops->path_update)
+		return -EINVAL;
+
+	ifmsh->hmc_ops = ops;
+	return 0;
+}
+EXPORT_SYMBOL(ieee80211_mesh_hmc_ops_register);
+
+void ieee80211_mesh_hmc_ops_unregister(struct ieee80211_sub_if_data *sdata)
+{
+	struct ieee80211_if_mesh *ifmsh = &sdata->u.mesh;
+
+	ifmsh->hmc_ops = NULL;
+}
+EXPORT_SYMBOL(ieee80211_mesh_hmc_ops_unregister);
 
 void ieee80211_mesh_init_sdata(struct ieee80211_sub_if_data *sdata)
 {

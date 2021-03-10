@@ -6,16 +6,20 @@
 #!/bin/sh
 
 OUT=hmc
-BR_IP=192.168.90.1
+BR_IP=192.168.90.10
 MESH_ID=mymesh
 
 rm -rf hmc
-rm -rf hmc.tgz
-cp ~/hmc.tgz .
+#rm -rf hmc.tgz
+#cp ~/hmc.tgz .
 tar -xvf hmc.tgz
+
+sudo rmmod hmc
+echo "Remove hmc module"
 
 sudo rmmod mac60211
 echo "Remove mac60211 module"
+
 sudo rmmod bridge
 echo "Remove bridge module"
 
@@ -72,3 +76,6 @@ sleep 1
 
 echo "Insert mac60211 module "
 sudo insmod $OUT/mac60211.ko
+
+echo "Insert hmc module "
+sudo insmod $OUT/hmc.ko
