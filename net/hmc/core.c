@@ -67,6 +67,7 @@ static void fdb_discard_frame(struct sk_buff *skb)
 	kfree_skb(skb);
 }
 
+#if 0
 static void fdb_flush_tx_pending(struct hmc_fdb_entry *fdb)
 {
 	struct sk_buff *skb;
@@ -81,6 +82,7 @@ static void fdb_flush_tx_pending(struct hmc_fdb_entry *fdb)
 			hmc_xmit(skb, fdb->iface_id);
 	}
 }
+#endif
 
 #if 0
 static void fdb_flush_pending(struct hmc_fdb_entry *fdb)
