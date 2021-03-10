@@ -57,9 +57,11 @@ typedef int64_t s64;
 #define STR_DUMPMPATH       "dumpmpath"
 #define STR_PLCGETMETRIC    "plcgetmetric"
 #define STR_PLCSETMETRIC    "plcsetmetric"
-#define STR_PLCSTADUMP      "plcstadump"
 #define STR_PLCGETMPARA     "plcgetmpara"
 #define STR_PLCSETMPARA     "plcsetmpara"
+#define STR_PLCDUMPSTA      "plcdumpsta"
+#define STR_PLCDUMPMPATH    "plcdumpmpath"
+
 //
 //ref: netlink.h
 //
@@ -68,7 +70,7 @@ typedef int64_t s64;
 #define NL60211FLAG_NO_RESPONSE 0x8000
 // nlmsg_type[7:0] is snap command enum
 enum {
-	NL60211_DEBUG = 0,       // a.out debug       br0 ...
+	NL60211_DEBUG = 0,     // a.out debug       br0 ...
 	NL60211_GETMESHID,     // a.out getmeshid   br0
 	NL60211_SETMESHID,     // a.out setmeshid   br0 mymesh0
 	NL60211_RECV,          // a.out recv        br0 AA 66
@@ -88,9 +90,10 @@ enum {
 
 	NL60211_PLC_GET_METRIC, // a.out plcgetmetric br0 [da]
 	NL60211_PLC_SET_METRIC, // a.out plcsetmetric br0 [da] [metric]
-	NL60211_PLC_STA_DUMP,   // a.out plcstadump   br0
 	NL60211_PLC_GET_MPARA,  // a.out plcgetmpara  br0 mpara_flag
 	NL60211_PLC_SET_MPARA,  // a.out plcsetmpara  br0 mpara_flag value
+	NL60211_PLC_DUMP_STA,   // a.out plcdumpsta   br0
+	NL60211_PLC_DUMP_MPATH, // a.out plcdumpmpath br0
 };
 
 // from private structure: ak60211_mesh_config
@@ -211,15 +214,6 @@ struct nl60211_plcsetmetric_res {
 	s32    return_code;
 };
 
-// refer to struct plc_sta_info
-struct nl60211_plcstadump_res {
-	s32    return_code;
-	u8     addr[ETH_ALEN];
-	u32    plink_state;
-	u16    llid;
-	u16    plid;
-};
-
 struct nl60211_plcgetmpara_res {
 	s32    return_code;
 	u32    param_flags;
@@ -228,6 +222,29 @@ struct nl60211_plcgetmpara_res {
 
 struct nl60211_plcsetmpara_res {
 	s32    return_code;
+};
+
+struct nl60211_plcdumpsta_res {
+	s32    return_code;
+	u8     addr[ETH_ALEN];
+	u32    plink_state;
+	u16    llid;
+	u16    plid;
+};
+
+// ref: struct ak60211_mesh_path
+struct nl60211_plcdumpmpath_res {
+	s32    return_code;
+	u8     da[ETH_ALEN];
+	u8     next_hop[ETH_ALEN];
+	u32    sn;
+	u32    metric;
+	u8     hop_count;
+	unsigned long exp_time;
+	u32    discovery_timeout;
+	u8     discovery_retries;
+	u32    flags;
+	u32    is_root;
 };
 
 // request
@@ -320,9 +337,6 @@ struct nl60211_plcsetmetric_req {
 	u32    metric;
 };
 
-struct nl60211_plcstadump_req {
-};
-
 struct nl60211_plcgetmpara_req {
 	u32    param_flags;
 };
@@ -331,6 +345,13 @@ struct nl60211_plcsetmpara_req {
 	u32    param_flags;
 	struct plc_mesh_config cfg;
 };
+
+struct nl60211_plcdumpsta_req {
+};
+
+struct nl60211_plcdumpmpath_req {
+};
+
 
 #define MAX_PAYLOAD 2048 /* maximum payload size for request&response */
 
@@ -1136,38 +1157,6 @@ int do_plcsetmetric(int argc, char **argv)
 	return 0;
 }
 
-int do_plcstadump(int argc, char **argv)
-{
-	unsigned int if_idx = nametoindex(argv[0]);
-	//request
-
-	//response
-	struct nl60211msg *nlres;
-	struct nl60211_plcstadump_res *res;
-	int i, temp;
-
-	if_nl_send(NL60211_PLC_STA_DUMP, if_idx, 0);
-	printf("%-21s %-10s %-10s %-10s\n",
-	       "DA", "plink_state", "llid", "plid");
-
-	while (1) {
-		if_nl_recv();
-		nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
-		res = (struct nl60211_plcstadump_res *)nlres->buf;
-		if (res->return_code < 0)
-			break;
-		//printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
-		//printf("if_index    = %d\n", nlres->if_index);
-		//printf("return_code = %d\n", res->return_code);
-		printf("%02X:%02X:%02X:%02X:%02X:%02X     ",
-		       res->addr[0], res->addr[1], res->addr[2],
-		       res->addr[3], res->addr[4], res->addr[5]);
-		printf("%-10d %-10d %-10d\n",
-		       res->plink_state, res->llid, res->plid);
-	}
-	return 0;
-}
-
 int do_plcgetmpara(int argc, char **argv)
 {
 	unsigned int if_idx = nametoindex(argv[0]);
@@ -1270,7 +1259,7 @@ int do_plcsetmpara(int argc, char **argv)
 		exit(-1);
 	}
 	req->param_flags = temp;
-	if (sscanf(argv[0], "%d", &value_for_set) == 0) {
+	if (sscanf(argv[1], "%d", &value_for_set) == 0) {
 		printf("Error: not a decimal string!\n");
 		exit(-1);
 	}
@@ -1325,6 +1314,72 @@ int do_plcsetmpara(int argc, char **argv)
 	return 0;
 }
 
+int do_plcdumpsta(int argc, char **argv)
+{
+	unsigned int if_idx = nametoindex(argv[0]);
+	//request
+
+	//response
+	struct nl60211msg *nlres;
+	struct nl60211_plcdumpsta_res *res;
+	int i, temp;
+
+	if_nl_send(NL60211_PLC_DUMP_STA, if_idx, 0);
+	printf("%-21s %-14s %-10s %-10s\n",
+	       "DA", "plink_state", "llid", "plid");
+
+	while (1) {
+		if_nl_recv();
+		nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
+		res = (struct nl60211_plcdumpsta_res *)nlres->buf;
+		if (res->return_code < 0)
+			break;
+		//printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
+		//printf("if_index    = %d\n", nlres->if_index);
+		//printf("return_code = %d\n", res->return_code);
+		printf("%02X:%02X:%02X:%02X:%02X:%02X     ",
+		       res->addr[0], res->addr[1], res->addr[2],
+		       res->addr[3], res->addr[4], res->addr[5]);
+		printf("0x%04x         %-10d %-10d\n",
+		       res->plink_state, res->llid, res->plid);
+	}
+	return 0;
+}
+
+int do_plcdumpmpath(int argc, char **argv)
+{
+	unsigned int if_idx = nametoindex(argv[0]);
+	//request
+
+	//response
+	struct nl60211msg *nlres;
+	struct nl60211_plcdumpmpath_res *res;
+	int i, temp;
+
+	if_nl_send(NL60211_PLC_DUMP_MPATH, if_idx, 0);
+	printf("%-21s %-21s %-6s %-6s %-10s %-6s %-7s\n",
+	       "DA", "NEXT_HOP", "SN", "METRIC", "EXPTIME", "FLAGS", "IS_ROOT");
+
+	while (1) {
+		if_nl_recv();
+		nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
+		res = (struct nl60211_plcdumpmpath_res *)nlres->buf;
+		if (res->return_code < 0)
+			break;
+		printf("%02X:%02X:%02X:%02X:%02X:%02X     ",
+		       res->da[0], res->da[1], res->da[2],
+		       res->da[3], res->da[4], res->da[5]);
+		printf("%02X:%02X:%02X:%02X:%02X:%02X     ",
+		       res->next_hop[0], res->next_hop[1], res->next_hop[2],
+		       res->next_hop[3], res->next_hop[4], res->next_hop[5]);
+		printf("%-6d %-6d %-10ld 0x%04x %-6d\n",
+		       res->sn, res->metric, res->exp_time,
+		       res->flags, res->is_root);
+	}
+	return 0;
+}
+
+
 static const struct cmd {
 	const char *cmd;
 	int (*func)(int argc, char **argv);
@@ -1347,9 +1402,10 @@ static const struct cmd {
 	{ STR_DUMPMPATH,    do_dumpmpath },
 	{ STR_PLCGETMETRIC, do_plcgetmetric },
 	{ STR_PLCSETMETRIC, do_plcsetmetric },
-	{ STR_PLCSTADUMP,   do_plcstadump },
 	{ STR_PLCGETMPARA,  do_plcgetmpara },
 	{ STR_PLCSETMPARA,  do_plcsetmpara },
+	{ STR_PLCDUMPSTA,   do_plcdumpsta },
+	{ STR_PLCDUMPMPATH, do_plcdumpmpath },
 	{ 0 }
 };
 

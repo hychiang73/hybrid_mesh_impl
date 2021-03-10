@@ -20,7 +20,7 @@
 #define NL60211FLAG_NO_RESPONSE 0x8000
 // nlmsg_type[7:0] is snap command enum
 enum {
-	NL60211_DEBUG = 0,       // a.out debug       br0 ...
+	NL60211_DEBUG = 0,     // a.out debug       br0 ...
 	NL60211_GETMESHID,     // a.out getmeshid   br0
 	NL60211_SETMESHID,     // a.out setmeshid   br0 mymesh0
 	NL60211_RECV,          // a.out recv        br0 AA 66
@@ -40,9 +40,10 @@ enum {
 
 	NL60211_PLC_GET_METRIC, // a.out plcgetmetric br0 [da]
 	NL60211_PLC_SET_METRIC, // a.out plcsetmetric br0 [da] [metric]
-	NL60211_PLC_STA_DUMP,   // a.out plcstadump   br0
 	NL60211_PLC_GET_MPARA,  // a.out plcgetmpara  br0 mpara_flag
 	NL60211_PLC_SET_MPARA,  // a.out plcsetmpara  br0 mpara_flag value
+	NL60211_PLC_DUMP_STA,   // a.out plcdumpsta   br0
+	NL60211_PLC_DUMP_MPATH, // a.out plcdumpmpath br0
 };
 
 // from private structure: ak60211_mesh_config
@@ -163,15 +164,6 @@ struct nl60211_plcsetmetric_res {
 	s32    return_code;
 };
 
-// refer to struct plc_sta_info
-struct nl60211_plcstadump_res {
-	s32    return_code;
-	u8     addr[ETH_ALEN];
-	u32    plink_state;
-	u16    llid;
-	u16    plid;
-};
-
 struct nl60211_plcgetmpara_res {
 	s32    return_code;
 	u32    param_flags;
@@ -180,6 +172,29 @@ struct nl60211_plcgetmpara_res {
 
 struct nl60211_plcsetmpara_res {
 	s32    return_code;
+};
+
+struct nl60211_plcdumpsta_res {
+	s32    return_code;
+	u8     addr[ETH_ALEN];
+	u32    plink_state;
+	u16    llid;
+	u16    plid;
+};
+
+// ref: struct ak60211_mesh_path
+struct nl60211_plcdumpmpath_res {
+	s32    return_code;
+	u8     da[ETH_ALEN];
+	u8     next_hop[ETH_ALEN];
+	u32    sn;
+	u32    metric;
+	u8     hop_count;
+	unsigned long exp_time;
+	u32    discovery_timeout;
+	u8     discovery_retries;
+	u32    flags;
+	u32    is_root;
 };
 
 // request
@@ -272,9 +287,6 @@ struct nl60211_plcsetmetric_req {
 	u32    metric;
 };
 
-struct nl60211_plcstadump_req {
-};
-
 struct nl60211_plcgetmpara_req {
 	u32    param_flags;
 };
@@ -282,6 +294,12 @@ struct nl60211_plcgetmpara_req {
 struct nl60211_plcsetmpara_req {
 	u32    param_flags;
 	struct plc_mesh_config cfg;
+};
+
+struct nl60211_plcdumpsta_req {
+};
+
+struct nl60211_plcdumpmpath_req {
 };
 
 #define MAX_PAYLOAD 2048 /* maximum payload size for request&response */
@@ -404,6 +422,21 @@ static unsigned int is_nl60211_in_recv;
 static unsigned int is_nl60211_in_recv_once;
 static unsigned char recv_ether_type[2];
 
+static void nl60211_cmd_plc_exp_time_reset(struct ak60211_if_data *ifmsh)
+{
+	struct ak60211_mesh_path *mpath;
+	struct hlist_node *n;
+	struct ak60211_mesh_table *tbl = ifmsh->mesh_paths;
+
+	spin_lock_bh(&tbl->walk_lock);
+	hlist_for_each_entry_safe(mpath, n, &tbl->walk_head, walk_list) {
+		mpath->exp_time = jiffies;
+		ifmsh->hmc_ops->path_update(mpath->dst,
+			mpath->metric, mpath->sn, mpath->flags, HMC_PORT_PLC);
+	}
+	spin_unlock_bh(&tbl->walk_lock);
+}
+
 static void nl60211_cmd_simple_response(
 	struct nl60211msg *nlreq,
 	u32 payload_len,
@@ -440,7 +473,7 @@ static void nl60211_cmd_simple_response(
 static void nl60211_cmd_debug_dump(struct nl60211msg *nlreq)
 {
 	pr_warn("====== SNAP DUMP ======\n");
-	pr_warn("magic number = %d\n", 124);
+	pr_warn("magic number = %d\n", 125);
 	pr_warn("pr_debug_en = %d\n", pr_debug_en);
 	pr_warn("pid_of_sender = %d\n", PID_OF_SENDER);
 	pr_warn("pid_of_receiver = %d\n", pid_of_receiver);
@@ -927,9 +960,12 @@ static void nl60211_cmd_dumpmpath(struct nl60211msg *nlreq)
 	u32 nlmsgsize, i = 0;
 	int ret, do_final_msg = 0;
 
-	if (!pdata->hmc_ops)
+	if (!pdata->hmc_ops) {
+		pr_err("hmc_ops doesn't exist.\n");
 		return;
+	}
 
+	//ref: hmc_ops_fdb_dump()
 	if (pdata->hmc_ops->fdb_dump(info, HMC_MAX_NODES) < 0) {
 		pr_err("info size is overflow\n");
 		do_final_msg = 1;
@@ -937,6 +973,9 @@ static void nl60211_cmd_dumpmpath(struct nl60211msg *nlreq)
 	//response
 	if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
 		return;
+	nl60211_cmd_plc_exp_time_reset(pdata);
+	nlmsgsize = sizeof(struct nl60211msg) - sizeof(nlres->buf) +
+		    sizeof(struct nl60211_dumpmpath_res);
 	while (1) {
 		if (do_final_msg == 0) {
 			if (i >= HMC_MAX_NODES) {
@@ -948,15 +987,11 @@ static void nl60211_cmd_dumpmpath(struct nl60211msg *nlreq)
 				}
 			}
 		}
-
-		nlmsgsize = sizeof(struct nl60211msg) - sizeof(nlres->buf) +
-			    sizeof(struct nl60211_dumpmpath_res);
 		skbres = nlmsg_new(nlmsgsize, GFP_ATOMIC);
 		if (!skbres) {
 			pr_err("Failed to allocate new skb\n");
 			return;
 		}
-
 		nlres = (struct nl60211msg *)nlmsg_put(skbres, 0, 0, NLMSG_DONE,
 						       nlmsgsize, 0);
 		NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
@@ -1012,6 +1047,7 @@ static void nl60211_cmd_plcgetmetric(struct nl60211msg *nlreq)
 	//response
 	if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
 		return;
+	nl60211_cmd_plc_exp_time_reset(pdata);
 	nlmsgsize = sizeof(struct nl60211msg) - sizeof(nlres->buf) +
 		    sizeof(struct nl60211_plcgetmetric_res);
 	skbres = nlmsg_new(nlmsgsize, GFP_ATOMIC);
@@ -1054,12 +1090,15 @@ static void nl60211_cmd_plcsetmetric(struct nl60211msg *nlreq)
 	struct nl60211_plcsetmetric_res simpleres;
 	s32 return_code = 0;
 
+	nl60211_cmd_plc_exp_time_reset(pdata);
 	mpath = ak60211_mpath_lookup(pdata, req->da);
 
 	//request
 	if (mpath) {
 		return_code = 0;
 		mpath->metric = req->metric;
+		pdata->hmc_ops->path_update(mpath->dst,
+			mpath->metric, mpath->sn, mpath->flags, HMC_PORT_PLC);
 	} else {
 		return_code = -1;
 	}
@@ -1067,71 +1106,6 @@ static void nl60211_cmd_plcsetmetric(struct nl60211msg *nlreq)
 	//response
 	simpleres.return_code = return_code;
 	nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
-}
-
-static void nl60211_cmd_plcstadump(struct nl60211msg *nlreq)
-{
-	//request
-	struct plc_sta_info infos[32] = {0};
-	//response
-	struct sk_buff *skbres;
-	struct nl60211msg *nlres;
-	struct nl60211_plcstadump_res *res;
-	u32 nlmsgsize;
-	int ret, do_final_msg = 0;
-	size_t info_num;
-	size_t i = 0;
-
-	plc_sta_dump((struct plc_sta_info **)&infos, &info_num);
-
-	//response
-	if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
-		return;
-	while (1) {
-		if (do_final_msg == 0) {
-			if (i >= info_num)
-				do_final_msg = 1;
-		}
-
-		nlmsgsize = sizeof(struct nl60211msg) - sizeof(nlres->buf) +
-			    sizeof(struct nl60211_plcstadump_res);
-		skbres = nlmsg_new(nlmsgsize, GFP_ATOMIC);
-		if (!skbres) {
-			pr_err("Failed to allocate new skb\n");
-			return;
-		}
-
-		nlres = (struct nl60211msg *)nlmsg_put(skbres, 0, 0, NLMSG_DONE,
-						       nlmsgsize, 0);
-		NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
-
-		//copy input command to response
-		nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
-		nlres->if_index = nlreq->if_index;
-
-		res = (struct nl60211_plcstadump_res *)nlres->buf;
-		if (do_final_msg) {
-			res->return_code = -1;
-		} else {
-			res->return_code = 0;
-			res->plink_state = infos[i].plink_state;
-			res->llid = infos[i].llid;
-			res->plid = infos[i].plid;
-			memcpy(res->addr, infos[i].addr, sizeof(res->addr));
-		}
-
-		//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
-		ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
-
-		if (ret < 0) {
-			pr_info("Error while sending back to user\n");
-			return;
-		}
-
-		if (do_final_msg)
-			break;
-		i++;
-	}
 }
 
 static void nl60211_cmd_plcgetmpara(struct nl60211msg *nlreq)
@@ -1282,6 +1256,146 @@ static void nl60211_cmd_plcsetmpara(struct nl60211msg *nlreq)
 	nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
 }
 
+static void nl60211_cmd_plcdumpsta(struct nl60211msg *nlreq)
+{
+	struct ak60211_if_data *plcdev = ak60211_dev_to_ifdata();
+	struct ak60211_sta_info *sta, *tmp;
+
+	//response
+	struct sk_buff *skbres;
+	struct nl60211msg *nlres;
+	struct nl60211_plcdumpsta_res *res;
+	u32 nlmsgsize;
+	int ret;
+
+	//response
+	if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
+		return;
+	nlmsgsize = sizeof(struct nl60211msg) - sizeof(nlres->buf) +
+		    sizeof(struct nl60211_plcdumpsta_res);
+
+	mutex_lock(&plcdev->sta_mtx);
+	list_for_each_entry_safe(sta, tmp, &plcdev->sta_list, list) {
+		skbres = nlmsg_new(nlmsgsize, GFP_ATOMIC);
+		if (!skbres) {
+			pr_err("Failed to allocate new skb\n");
+			return;
+		}
+		nlres = (struct nl60211msg *)nlmsg_put(skbres, 0, 0, NLMSG_DONE,
+						       nlmsgsize, 0);
+		NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
+		//copy input command to response
+		nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
+		nlres->if_index = nlreq->if_index;
+		res = (struct nl60211_plcdumpsta_res *)nlres->buf;
+		res->return_code = 0;
+		res->plink_state = (u32)sta->plink_state;
+		res->llid = sta->llid;
+		res->plid = sta->plid;
+		memcpy(res->addr, sta->addr, sizeof(res->addr));
+		//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
+		ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
+		if (ret < 0) {
+			pr_info("Error while sending back to user\n");
+			return;
+		}
+	}
+	mutex_unlock(&plcdev->sta_mtx);
+
+	skbres = nlmsg_new(nlmsgsize, GFP_ATOMIC);
+	if (!skbres) {
+		pr_err("Failed to allocate new skb\n");
+		return;
+	}
+	nlres = (struct nl60211msg *)nlmsg_put(skbres, 0, 0, NLMSG_DONE,
+					       nlmsgsize, 0);
+	NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
+	//copy input command to response
+	nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
+	nlres->if_index = nlreq->if_index;
+	res = (struct nl60211_plcdumpsta_res *)nlres->buf;
+	res->return_code = -1;
+	//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
+	ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
+	if (ret < 0) {
+		pr_info("Error while sending back to user\n");
+		return;
+	}
+}
+
+static void nl60211_cmd_plcdumpmpath(struct nl60211msg *nlreq)
+{
+	struct ak60211_if_data *ifmsh = ak60211_dev_to_ifdata();
+	struct ak60211_mesh_path *mpath;
+	struct hlist_node *n;
+	struct ak60211_mesh_table *tbl = ifmsh->mesh_paths;
+
+	//response
+	struct sk_buff *skbres;
+	struct nl60211msg *nlres;
+	struct nl60211_plcdumpmpath_res *res;
+	u32 nlmsgsize;
+	int ret;
+
+	//response
+	if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
+		return;
+	nl60211_cmd_plc_exp_time_reset(ifmsh);
+	nlmsgsize = sizeof(struct nl60211msg) - sizeof(nlres->buf) +
+		    sizeof(struct nl60211_plcdumpmpath_res);
+	spin_lock_bh(&tbl->walk_lock);
+	hlist_for_each_entry_safe(mpath, n, &tbl->walk_head, walk_list) {
+		skbres = nlmsg_new(nlmsgsize, GFP_ATOMIC);
+		if (!skbres) {
+			pr_err("Failed to allocate new skb\n");
+			return;
+		}
+		nlres = (struct nl60211msg *)nlmsg_put(skbres, 0, 0, NLMSG_DONE,
+						       nlmsgsize, 0);
+		NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
+		//copy input command to response
+		nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
+		nlres->if_index = nlreq->if_index;
+		res = (struct nl60211_plcdumpmpath_res *)nlres->buf;
+		res->return_code = 0;
+		memcpy(res->da, mpath->dst, ETH_ALEN);
+		memcpy(res->next_hop, mpath->next_hop->addr, ETH_ALEN);
+		res->sn = mpath->sn;
+		res->metric = mpath->metric;
+		res->hop_count = mpath->hop_count;
+		res->exp_time = mpath->exp_time;
+		res->discovery_timeout = mpath->discovery_timeout;
+		res->discovery_retries = mpath->discovery_retries;
+		res->flags = (u32)mpath->flags;
+		res->is_root = (u32)mpath->is_root;
+		ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
+		if (ret < 0) {
+			pr_info("Error while sending back to user\n");
+			return;
+		}
+	}
+	spin_unlock_bh(&tbl->walk_lock);
+
+	skbres = nlmsg_new(nlmsgsize, GFP_ATOMIC);
+	if (!skbres) {
+		pr_err("Failed to allocate new skb\n");
+		return;
+	}
+	nlres = (struct nl60211msg *)nlmsg_put(skbres, 0, 0, NLMSG_DONE,
+					       nlmsgsize, 0);
+	NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
+	//copy input command to response
+	nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
+	nlres->if_index = nlreq->if_index;
+	res = (struct nl60211_plcdumpmpath_res *)nlres->buf;
+	res->return_code = -1;
+	ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
+	if (ret < 0) {
+		pr_info("Error while sending back to user\n");
+		return;
+	}
+}
+
 static int nl60211_rx_callback_proto_filter(size_t len, u8 *data)
 {
 	struct sk_buff *skb_res;
@@ -1378,8 +1492,8 @@ static void nl60211_netlink_input(struct sk_buff *skb_in)
 	nlh = (struct nlmsghdr *)skb_in->data;
 	nlreq = (struct nl60211msg *)skb_in->data;
 
-	pr_info("\nEntering: %s\n", __func__);
 	if (pr_debug_en) {
+		pr_info("\nEntering: %s\n", __func__);
 		pr_info("skb_in: len=%d, data_len=%d, mac_len=%d\n",
 			skb_in->len, skb_in->data_len, skb_in->mac_len);
 		pr_info("skb_in          = %p\n", skb_in);
@@ -1456,14 +1570,17 @@ static void nl60211_netlink_input(struct sk_buff *skb_in)
 	case NL60211_PLC_SET_METRIC:
 		nl60211_cmd_plcsetmetric(nlreq);
 		break;
-	case NL60211_PLC_STA_DUMP:
-		nl60211_cmd_plcstadump(nlreq);
-		break;
 	case NL60211_PLC_GET_MPARA:
 		nl60211_cmd_plcgetmpara(nlreq);
 		break;
 	case NL60211_PLC_SET_MPARA:
 		nl60211_cmd_plcsetmpara(nlreq);
+		break;
+	case NL60211_PLC_DUMP_STA:
+		nl60211_cmd_plcdumpsta(nlreq);
+		break;
+	case NL60211_PLC_DUMP_MPATH:
+		nl60211_cmd_plcdumpmpath(nlreq);
 		break;
 	default:
 		pr_warn("[NL60211] Unknown command = %d\n", nlh->nlmsg_type);
