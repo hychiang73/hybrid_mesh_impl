@@ -257,8 +257,8 @@ struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 		hmc_dbg("pm = %d, wm = %d\n", plc->metric, wlan->metric);
 		if (plc->metric <= wlan->metric) {
 			if (hmc_check_port_state(HMC_PORT_PLC) != 0) {
-				hmc_err("eth0 port is disabled ... resolve");
-				return NULL;
+				hmc_err("eth0 port is disabled ... switch to wlan0");
+				return wlan;
 			}
 			return plc;
 		}
