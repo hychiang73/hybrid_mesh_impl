@@ -52,6 +52,26 @@ static inline int hmc_mac_hash(const u8 *mac, u16 iface_id)
 	return jhash_2words(key, iface_id, fdb_salt) & (HMC_HASH_SIZE - 1);
 }
 
+static int hmc_check_port_state(int port)
+{
+	struct net_bridge_port *p;
+
+	if (port == HMC_PORT_PLC)
+		p = br_port_get_rtnl(hmc->edev);
+	else
+		p = br_port_get_rtnl(hmc->wdev);
+
+	if (!p)
+		return -ENODEV;
+
+	hmc_dbg("port (%s) state = %d", p->dev->name, p->state);
+
+	if (p->state == BR_STATE_FORWARDING)
+		return 0;
+	else
+		return -1;
+}
+
 #if 0
 static bool fdb_expired(struct hmc_fdb_entry *f)
 {
@@ -226,8 +246,6 @@ struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 			}
 		}
 	}
-	
-	//hmc_dbg("dst = %pM, p = %p, w = %p\n", addr, plc, wlan);
 
 	if (!plc && !wlan)
 		return NULL;
@@ -237,10 +255,14 @@ struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 		return plc;
 	else {
 		hmc_dbg("pm = %d, wm = %d\n", plc->metric, wlan->metric);
-		if (plc->metric <= wlan->metric)
+		if (plc->metric <= wlan->metric) {
+			if (hmc_check_port_state(HMC_PORT_PLC) != 0) {
+				hmc_err("eth0 port is disabled ... resolve");
+				return NULL;
+			}
 			return plc;
-		else
-			return wlan;
+		}
+		return wlan;
 	}
 }
 
@@ -307,6 +329,8 @@ int hmc_wpath_convert_proxy_to_dest(const u8 *proxy, u8 *dst)
 	struct hlist_node *n;
 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(hmc->wdev);
 	struct mesh_table *tbl = sdata->u.mesh.mpp_paths;
+	const u8 bitmask[6] = {0xff, 0xff, 0xff, 0x0, 0x0 ,0x0};
+	const u8 nv_ether_id[6] = {0x0, 0x04, 0x4b, 0x0, 0x0, 0x0};
 	bool spin_lock = spin_is_locked(&tbl->walk_lock);
 
 	hmc_dbg("convert proxy addr : %pM, lock = %d\n", proxy, spin_lock);
@@ -316,7 +340,8 @@ int hmc_wpath_convert_proxy_to_dest(const u8 *proxy, u8 *dst)
 
 	hlist_for_each_entry_safe(mpath, n, &tbl->walk_head, walk_list) {
 		if (ether_addr_equal(mpath->mpp, proxy) &&
-					is_valid_ether_addr(mpath->dst)) {
+			!ether_addr_equal(mpath->dst, hmc->br_addr) &&
+			ether_addr_equal_masked(mpath->dst, nv_ether_id, bitmask)) {
 			memcpy(dst, mpath->dst, ETH_ALEN);
 			ret = 0;
 			goto out;
@@ -515,16 +540,14 @@ static int hmc_plc_path_resolve(struct sk_buff *skb, u8 *addr)
 
 int hmc_xmit(struct sk_buff *skb, int egress)
 {
-	struct net_bridge *br;
+	struct net_bridge *br = netdev_priv(hmc->bdev);
 	struct net_bridge_port *p, *n;
 
 	if (CHECK_MEM(skb))
 		return -ENOMEM;
 
-	br = netdev_priv(hmc->bdev);
-
-	mutex_lock(&hmc->xmit_mutex);
-	rcu_read_lock();
+	//mutex_lock(&hmc->xmit_mutex);
+	//rcu_read_lock();
 
 	list_for_each_entry_safe(p, n, &br->port_list, list) {
 		if (egress == HMC_PORT_FLOOD ||
@@ -537,8 +560,8 @@ int hmc_xmit(struct sk_buff *skb, int egress)
 		}
 	}
 
-	rcu_read_unlock();
-	mutex_unlock(&hmc->xmit_mutex);
+	//rcu_read_unlock();
+	//mutex_unlock(&hmc->xmit_mutex);
 	return 0;
 }
 
