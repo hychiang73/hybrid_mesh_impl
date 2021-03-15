@@ -542,12 +542,27 @@ int hmc_xmit(struct sk_buff *skb, int egress)
 {
 	struct net_bridge *br = netdev_priv(hmc->bdev);
 	struct net_bridge_port *p, *n;
+	struct hmc_fdb_entry *fdb;
+	u8 dest[ETH_ALEN] = {0};
 
 	if (CHECK_MEM(skb))
 		return -ENOMEM;
 
-	//mutex_lock(&hmc->xmit_mutex);
-	//rcu_read_lock();
+	if (egress == HMC_PORT_BEST) {
+		memcpy(dest, skb->data, ETH_ALEN);
+		fdb = hmc_fdb_lookup_best(dest);
+		if (!CHECK_MEM(fdb)) {
+			hmc_dbg("best xmit port : %d", fdb->iface_id);
+			if (fdb->iface_id == HMC_PORT_PLC) {
+				skb->dev = hmc->edev;
+				dev_queue_xmit(skb);
+			} else {
+				skb->dev = hmc->wdev;
+				dev_queue_xmit(skb);
+			}
+		}
+		return 0;
+	}
 
 	list_for_each_entry_safe(p, n, &br->port_list, list) {
 		if (egress == HMC_PORT_FLOOD ||
@@ -560,8 +575,6 @@ int hmc_xmit(struct sk_buff *skb, int egress)
 		}
 	}
 
-	//rcu_read_unlock();
-	//mutex_unlock(&hmc->xmit_mutex);
 	return 0;
 }
 

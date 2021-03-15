@@ -154,6 +154,8 @@ void test_hmc_gen_pkt(enum hmc_port_egress egress)
 		memcpy(da, wlan_mac, ETH_ALEN);
 	else if (egress == HMC_PORT_FLOOD)
 		memcpy(da, broadcast, ETH_ALEN);
+	else if (egress == HMC_PORT_BEST)
+		memcpy(da, eth_mac, ETH_ALEN);
 	else {
 		hmc_err("Unknown egress id\n");
 		return;
