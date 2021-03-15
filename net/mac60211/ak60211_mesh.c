@@ -1,6 +1,11 @@
 #include <ak60211_mesh_private.h>
 #include <mac60211.h>
 #include <nl60211.h>
+#include <linux/if_arp.h>
+#include <linux/inetdevice.h>
+#include <net/arp.h>
+#include <net/neighbour.h>
+
 
 #define MESH_TTL		31
 #define MESH_DEFAULT_ELEMENT_TTL 31
@@ -107,6 +112,14 @@ void ak60211_pkt_hex_dump(struct sk_buff *pskb, const char *type, int offset)
 	int i, l, linelen, remaining;
 	int li = 0;
 	struct sk_buff *skb;
+	/*
+	const struct arphdr *arp;
+	unsigned char *arp_ptr;
+	unsigned char *sha;
+	unsigned char *tha = NULL;
+	__be32 sip, tip;
+	u16 dev_type;
+	*/
 	u8 *data, ch;
 
 	if (!plc_dbg)
@@ -115,16 +128,95 @@ void ak60211_pkt_hex_dump(struct sk_buff *pskb, const char *type, int offset)
 	skb = skb_copy(pskb, GFP_ATOMIC);
 	data = (u8 *)skb_mac_header(skb);
 
+	/* arp = arp_hdr(skb); */
 	if (skb_is_nonlinear(skb))
 		len = skb->data_len;
 	else
 		len = skb->len;
 
+#if 0  // for debug, just save it but not use in gerenal
+	if (skb->dev) {
+		struct net_device *indev, *brdev;
+		struct in_device *in_dev = __in_dev_get_rcu(skb->dev);
+		struct neighbour *n;
+		struct net_bridge_port *p = ak_port_get_rcu(skb->dev);
+
+		brdev = p->br->dev;
+
+		if (!brdev) {
+			plc_err("brdev is NULL\n");
+			goto BR_DEV_NULL;
+		}
+
+		indev = skb->dev;
+		skb->dev = brdev;
+		dev_type = skb->dev->type;
+		plc_info("dev_type = %x\n", dev_type);
+		if (arp->ar_hln != skb->dev->addr_len)
+			plc_err("ar_hln != dev->addr_len\n");
+
+		arp_ptr = (unsigned char *)(arp + 1);
+		/* sha = sender hardware address
+		 * sip = sender ip address
+		 * tha = target hardware address
+		 * tip = target ip address
+		 * */
+		sha	= arp_ptr;
+		arp_ptr += skb->dev->addr_len;
+		memcpy(&sip, arp_ptr, 4);
+		arp_ptr += 4;
+
+		tha = arp_ptr;
+		arp_ptr += skb->dev->addr_len;
+		memcpy(&tip, arp_ptr, 4);
+
+		plc_info("sha:%pM, tha:%pM\n", sha, tha);
+		plc_info("sip:%d, tip:%d\n", sip, tip);
+
+		if (ipv4_is_multicast(tip))
+			plc_err("tip is multicast\n");
+		if (ipv4_is_loopback(tip))
+			plc_err("tip is loopback\n");
+		if (sip == tip)
+			plc_err("sip = tip\n");
+		if (sip == 0)
+			plc_err("sip = 0\n");
+		if (arp->ar_pln != 4)
+			plc_err("ar_pln != 4\n");
+		if (arp->ar_hrd != htons(ARPHRD_ETHER))
+			plc_err("ar_hrd != ARPHRD_ETHER\n");
+		if (arp->ar_hrd != htons(ARPHRD_IEEE802))
+			plc_err("ar_hrd != ARPHRD_EEE802\n");
+		if (arp->ar_pro != htons(ETH_P_IP))
+			plc_err("ar_pro != ETH_P_IP\n");
+		if (arp->ar_op != htons(ARPOP_REPLY) &&
+				arp->ar_op != htons(ARPOP_REQUEST))
+			plc_err("arp_op != AROPO_REP/REQ\n");
+
+		if (arp->ar_op == htons(ARPOP_REQUEST)) {
+			plc_info("arp_op is ARPOP_REQUEST\n");
+		}
+		if (arp->ar_op == htons(ARPOP_REPLY)) {
+			plc_info("arp op is ARPOP_REPLY\n");
+		}
+
+		n = __neigh_lookup(&arp_tbl, &sip, skb->dev, 0);
+
+		if (!n)
+			plc_err("neigh is not exist\n");
+		if (!IN_DEV_ARP_ACCEPT(in_dev))
+			plc_err("ARP_ACCEPT in dev is false\n");
+	} else {
+BR_DEV_NULL:
+		plc_err("skb->dev is NULL\n");
+	}
+#endif
 	if (skb->data != data) {
 		plc_info("skb->data != skb->mac_header\n");
 		len += 14;
 	}
 	remaining = len + 2 + offset;
+
 	pr_info("Packet hex dump (len = %ld, %d):\n", len, skb->data_len);
 	pr_info("============== %s ==============\n", type);
 	for (i = 0; i < len; i += rowsize) {
@@ -457,11 +549,14 @@ int ak60211_mpath_sel_frame_tx(enum ak60211_mpath_frame_type action, u8 flags,
 	return true;
 }
 
-void ak60211_plcto8023_unencap(struct ak60211_if_data *ifmsh, struct plc_packet_union *buff, struct sk_buff *skb)
+void ak60211_plcto8023_unencap(struct ak60211_if_data *ifmsh,
+							   struct plc_packet_union *buff,
+							   struct sk_buff *skb)
 {
 	struct ethhdr eth;
 	u8 *pos;
 	u32 plchdrsize;
+
 	PLC_TRACE();
 
 	rmb();
@@ -469,20 +564,25 @@ void ak60211_plcto8023_unencap(struct ak60211_if_data *ifmsh, struct plc_packet_
 
 	plchdrsize = sizeof(struct plc_hdr) + sizeof(struct ak60211s_hdr);
 
-	ak60211_pkt_hex_dump(skb, "ak60211_frame unencap(1)", 0);
+	/* ak60211_pkt_hex_dump(skb, "ak60211_frame unencap(1)", 0); */
 
 	memcpy(pos + ETH_ALEN * 2, skb->data + plchdrsize - 2, 2);
 	memcpy(&eth, pos, sizeof(struct ethhdr));
 	skb_pull(skb, plchdrsize);
-	memcpy(skb_push(skb, sizeof(struct ethhdr)), &eth, sizeof(struct ethhdr));
+	memcpy(skb_push(skb, sizeof(struct ethhdr)),
+		   &eth, sizeof(struct ethhdr));
 
-	skb_reset_mac_header(skb);
-	skb_pull(skb, sizeof(struct ethhdr));
+	skb->protocol = eth_type_trans(skb, skb->dev);
+
+	skb_reset_network_header(skb);
+
 	ak60211_pkt_hex_dump(skb, "ak60211_frame unencap(2)", 0);
 }
 
 
-void ak60211_mesh_data_handle(struct ak60211_if_data *ifmsh, struct plc_packet_union *buff, struct sk_buff *skb)
+void ak60211_mesh_data_handle(struct ak60211_if_data *ifmsh,
+							  struct plc_packet_union *buff,
+							  struct sk_buff *skb)
 {
 	PLC_TRACE();
 
@@ -514,8 +614,8 @@ void ak60211_fill_mesh_address(struct plc_hdr *hdr, __le16 *fc,
 }
 
 void ak60211_new_mesh_header(struct ak60211_if_data *ifmsh,
-								struct plc_packet_union *pkts,
-								const char *addr4or5, const char *addr6)
+							 struct plc_packet_union *pkts,
+							 const char *addr4or5, const char *addr6)
 {
 	if (WARN_ON(!addr4or5 && addr6))
 		return;
@@ -535,11 +635,13 @@ void ak60211_new_mesh_header(struct ak60211_if_data *ifmsh,
 	}
 }
 
-int ak60211_mesh_nexthop_lookup(struct ak60211_if_data *ifmsh, struct sk_buff *skb)
+int ak60211_mesh_nexthop_lookup(struct ak60211_if_data *ifmsh,
+								struct sk_buff *skb)
 {
 	struct ak60211_mesh_path *mpath;
 	struct ak60211_sta_info *nexthop;
-	struct plc_packet_union *plcpkts = (struct plc_packet_union *) skb->data;
+	struct plc_packet_union *plcpkts =
+		(struct plc_packet_union *) skb->data;
 	u8 *target_addr = plcpkts->plchdr.machdr.h_addr3;
 
 	PLC_TRACE();
@@ -580,14 +682,11 @@ int ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 	if (!ifmsh->hmc_ops)
 		return 0;
 
-	ak60211_pkt_hex_dump(skb, "ak60211_nexthop_resolved(ORI)", 0);
+	/* ak60211_pkt_hex_dump(skb, "ak60211_nexthop_resolved(ORI)", 0); */
 	ethertype = (skb->data[12] << 8) | skb->data[13];
 	memcpy(&plcpkts, skb->data, sizeof(struct ethhdr));
 	fc = cpu_to_le16(AK60211_FTYPE_DATA |
 					AK60211_STYPE_QOSDATA);
-
-	plc_info("da-%pM, sa-%pM, type-%x\n",
-			skb->data, skb->data + ETH_ALEN, ethertype);
 
 	if (!ether_addr_equal(ifmsh->addr, skb->data + ETH_ALEN)) {
 		plc_info("sa is not plc, exit\n");
@@ -606,13 +705,13 @@ int ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 
 			/* TODO: mpp table */
 			if (!nexthop ||
-					!(mpath->flags & (PLC_MESH_PATH_ACTIVE |
-								PLC_MESH_PATH_RESOLVING)))
+				!(mpath->flags &
+				  (PLC_MESH_PATH_ACTIVE |
+				   PLC_MESH_PATH_RESOLVING)))
 				mpp_lookup = true;
 
-			if (mpp_lookup) {
-				/* TODO: mpp table check*/
-			}
+			if (mpp_lookup)
+				;/* TODO: mpp table check*/
 		}
 	}
 
@@ -620,7 +719,8 @@ int ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 			!(mppath && !ether_addr_equal(mppath->mpp, skb->data)))*/ || 1) {
 		/* ?????????  need to check */
 		ak60211_fill_mesh_address(&plcpkts.plchdr, &fc,
-							skb->data, skb->data + ETH_ALEN);
+								  skb->data,
+								  skb->data + ETH_ALEN);
 		ak60211_new_mesh_header(ifmsh, &plcpkts, NULL, NULL);
 	} else {
 		const u8 *mesh_da = skb->data;
@@ -660,19 +760,20 @@ int ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 	plcpkts.un.meshhdr.ethtype = ntohs(ethertype);
 
 	skip_header_bytes = ETH_HLEN;
+
+	/*
 	if (ethertype == ETH_P_AARP || ethertype == ETH_P_IPX) {
-		/* TODO: bridge tunnel header? */
+		TODO: bridge tunnel header?
 	} else if (ethertype >= ETH_P_802_3_MIN) {
-		/* rfc1042_header? */
+		rfc1042_header?
 	} else {
 
 	}
+	*/
 
 	skb_pull(skb, skip_header_bytes);
 	head_need = hdrlen - skb_headroom(skb);
 
-	plc_info("head_need:%d, %d, %d, %d\n", head_need, hdrlen, skb_headroom(skb),
-			skb_tailroom(skb));
 	if (head_need > 0 || skb_cloned(skb)) {
 		plc_info("cloned\n");
 		head_need += 2; /* sdata->encrypt_headroom */
@@ -692,7 +793,6 @@ int ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 
 	ak60211_pkt_hex_dump(skb, "ak60211_nexthop_resolved(PLC)", 0);
 	if (!ak60211_mesh_nexthop_lookup(ifmsh, skb)) {
-		plc_info("plc xmit successfully\n");
 		ifmsh->hmc_ops->xmit(skb, iface_id);
 	} else {
 		plc_err("plc xmit failed\n");
@@ -703,7 +803,7 @@ int ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 
 free:
 	kfree_skb(skb);
-	return -ENOMEM;//ERR_PTR(ret);
+	return -ENOMEM;
 }
 EXPORT_SYMBOL(ak60211_nexthop_resolved);
 
@@ -810,6 +910,7 @@ int ak60211_rx_handler(struct sk_buff *pskb, struct sk_buff *nskb)
 		case AK60211_STYPE_QOSDATA:
 			plc_info("S_QOSDATA\n");
 			ak60211_mesh_data_handle(&plcdev, plcbuff, skb);
+			//netif_receive_skb(skb);
 			goto drop;
 		}
 		break;
