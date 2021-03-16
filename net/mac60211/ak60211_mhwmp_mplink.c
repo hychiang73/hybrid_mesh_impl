@@ -20,6 +20,23 @@ static inline u32 ak60211_mplink_free_count(struct ak60211_if_data *ifmsh)
 	return ifmsh->mshcfg.MeshMaxPeerLinks - atomic_read(&ifmsh->estab_plinks);
 }
 
+void ak60211_mesh_plink_fsm_restart(struct ak60211_sta_info *sta)
+{
+	struct ak60211_if_data *ifmsh = sta->local;
+	struct ak60211_mesh_table *tbl = ifmsh->mesh_paths;
+	struct ak60211_mesh_path *mpath;
+
+	sta->plink_state = AK60211_PLINK_LISTEN;
+	sta->reason = 0;
+	sta->plid = 0;
+	sta->llid = 0;
+
+	mpath = ak60211_mpath_lookup(ifmsh, sta->addr);
+	if (mpath)
+		__ak60211_mpath_del(tbl, mpath);
+	/* sta->llid = sta->plid = sta->reason = 0; */
+}
+
 int __ak60211_mpath_queue_preq(struct ak60211_if_data *ifmsh,
 				   const u8 *dst,
 				   u8 flags)

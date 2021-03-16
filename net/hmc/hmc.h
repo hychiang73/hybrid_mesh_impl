@@ -18,7 +18,7 @@
 
 //#define HMC_DBG
 
-#define EN_PLC_ENCAP			0
+#define EN_PLC_ENCAP			1
 #define HMC_SKB_QUEUE_LEN		10
 #define HMC_HASH_BITS			8
 #define HMC_MAX_NODES			16

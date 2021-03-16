@@ -196,7 +196,7 @@ static void ak60211_mpath_free_rcu(struct ak60211_mesh_table *tbl,
 	kfree_rcu(mpath, rcu);
 }
 
-static void __ak60211_mpath_del(struct ak60211_mesh_table *tbl,
+void __ak60211_mpath_del(struct ak60211_mesh_table *tbl,
 				struct ak60211_mesh_path *mpath)
 {
 	struct ak60211_if_data *ifmsh = ak60211_dev_to_ifdata();

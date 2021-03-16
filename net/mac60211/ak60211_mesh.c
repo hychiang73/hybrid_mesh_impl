@@ -30,7 +30,7 @@
  * before timing out.  This way it will remain ACTIVE and no data frames
  * will be unnecessarily held in the pending queue.
  */
-#define MESH_PATH_REFRESH_TIME			1000
+#define MESH_PATH_REFRESH_TIME			3000
 #define MESH_MIN_DISCOVERY_TIMEOUT (2 * MESH_DIAM_TRAVERSAL_TIME)
 
 /* Default maximum number of established plinks per interface */
@@ -650,7 +650,7 @@ int ak60211_mesh_nexthop_lookup(struct ak60211_if_data *ifmsh,
 		return -ENOENT;
 
 	if (time_after(jiffies, mpath->exp_time -
-					msecs_to_jiffies(ifmsh->mshcfg.path_refresh_time)) &&
+	    msecs_to_jiffies(ifmsh->mshcfg.path_refresh_time)) &&
 		ether_addr_equal(ifmsh->addr, plcpkts->plchdr.machdr.h_addr4) &&
 		!(mpath->flags & PLC_MESH_PATH_RESOLVING) &&
 		!(mpath->flags & PLC_MESH_PATH_FIXED))
@@ -796,6 +796,7 @@ int ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 		ifmsh->hmc_ops->xmit(skb, iface_id);
 	} else {
 		plc_err("plc xmit failed\n");
+		ifmsh->hmc_ops->path_del(plcpkts.plchdr.machdr.h_addr3);
 		goto free;
 	}
 
@@ -879,7 +880,6 @@ int ak60211_rx_handler(struct sk_buff *pskb, struct sk_buff *nskb)
 	}
 
 	if (htons(plcbuff->ethtype) != 0xAA55) {
-		ak60211_pkt_hex_dump(pskb, "ak_rx", 0);
 		goto drop;
 	}
 

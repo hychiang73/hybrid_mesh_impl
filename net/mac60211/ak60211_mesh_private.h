@@ -506,15 +506,6 @@ static inline void ak60211_dev_unlock(struct ak60211_if_data *dev)
 	__release(&dev->mtx);
 }
 
-static inline void ak60211_mesh_plink_fsm_restart(struct ak60211_sta_info *sta)
-{
-	sta->plink_state = AK60211_PLINK_LISTEN;
-	sta->reason = 0;
-	sta->plid = 0;
-	sta->llid = 0;
-	/* sta->llid = sta->plid = sta->reason = 0; */
-}
-
 static inline struct ak60211_sta_info *
 ak60211_next_hop_deref_protected(struct ak60211_mesh_path *mpath)
 {
@@ -578,5 +569,8 @@ void ak60211_mesh_hmc_ops_unregister(void);
 void ak60211_mplink_timer(struct timer_list *t);
 int ak60211_mpath_error_tx(struct ak60211_if_data *ifmsh, u8 ttl, const u8 *target,
 							u32 target_sn, u16 target_rcode, const u8 *ra);
+void __ak60211_mpath_del(struct ak60211_mesh_table *tbl,
+				struct ak60211_mesh_path *mpath);
+void ak60211_mesh_plink_fsm_restart(struct ak60211_sta_info *sta);
 
 #endif
