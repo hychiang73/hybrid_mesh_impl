@@ -1,21 +1,7 @@
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-#include <stdint.h>
-#include <unistd.h>
-#include <stdbool.h>
-#include <net/if.h> // for if_nametoindex()
-#include <errno.h> // for perror()
-#include <linux/errno.h>
-#include <linux/if_ether.h>
-#include <linux/netlink.h>
-#include "nl60211_uapi.h"
 
+#include "everything.h"
 
-
-#define STR_DEBUG           "debug"
+#define STR_CTRL            "ctrl"
 #define STR_GETMESHID       "getmeshid"
 #define STR_SETMESHID       "setmeshid"
 #define STR_RECV            "recv"
@@ -37,12 +23,6 @@
 #define STR_PLCSETMPARA     "plcsetmpara"
 #define STR_PLCDUMPSTA      "plcdumpsta"
 #define STR_PLCDUMPMPATH    "plcdumpmpath"
-
-struct nl60211skmsg {
-	struct msghdr       sk_msghdr;
-	struct iovec        iov;
-	struct nl60211msg   nl_msg;
-};
 
 struct sockaddr_nl src_addr, dest_addr;
 //struct nlmsghdr *nlh = NULL;
@@ -88,6 +68,7 @@ int if_nl_send(uint16_t type, unsigned int if_index, uint32_t buf_len)
 		sizeof(struct nl60211msg) - MAX_PAYLOAD + buf_len;
 
 	msg->nl_msghdr.nlmsg_pid = getpid();
+	//printf("if_nl_send() : msg->nl_msghdr.nlmsg_pid = %d\n", msg->nl_msghdr.nlmsg_pid);
 	msg->nl_msghdr.nlmsg_flags = 0;
 	msg->nl_msghdr.nlmsg_type = type;
 
@@ -139,7 +120,7 @@ bool matches(const char *prefix, const char *string)
 	return !!*prefix;
 }
 
-static unsigned int nametoindex(char *name)
+static unsigned int nametoindex(const char *name)
 {
 	unsigned int if_idx = (uint32_t)if_nametoindex(name);
 
@@ -150,50 +131,88 @@ static unsigned int nametoindex(char *name)
 	return if_idx;
 }
 
-int do_debug(int argc, char **argv)
+int do_ctrl(int argc, char **argv)
 {
 	unsigned int if_idx = nametoindex(argv[0]);
 	//request
-	struct nl60211_debug_req *req;
+	struct nl60211_ctrl_req *req;
 	//response
 	struct nl60211msg *nlres;
-	struct nl60211_debug_res *res;
-	int i;
-	unsigned int temp;
+	struct nl60211_ctrl_res *res;
 
-	printf("debug start ... if = %s, idx = %d\n", argv[0], if_idx);
+	printf("ctrl proc start ... if = %s, idx = %d\n", argv[0], if_idx);
+	if (argc <= 1) {
+		printf("no control code, exit!\n");
+		exit(-1);
+	}
 	argc--;
 	argv++;
-	req = (struct nl60211_debug_req *)sk_msg_send.nl_msg.buf;
-	req->len = argc;
-	for (i = 0; i < argc; i++) {
-		if (sscanf(argv[i], "%x", &temp) == 0) {
-			printf("Error: not a hex string!\n");
-			exit(-1);
-		}
-		req->buf[i] = (uint8_t)temp;
-	}
-	if_nl_send(
-		NL60211_DEBUG,
-		if_idx,
-		sizeof(req->len) +/*da,sa,ether_type,payload*/argc);
+	req = (struct nl60211_ctrl_req *)sk_msg_send.nl_msg.buf;
+	req->ctrl_code = scan_u32(argv[0]);
 
-	do {
-		printf("debug recv ......\n");
-		if_nl_recv();
-		nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
-		res = (struct nl60211_debug_res *)nlres->buf;
-		printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
-		printf("if_index    = %d\n", nlres->if_index);
-		printf("return_code = %d\n", res->return_code);
-		printf("len         = %d\n", res->len);
-		for (i = 0; i < res->len; i++) {
-			printf("%02X ", res->buf[i]);
-			if ((i % 16) == 15)
-				printf("\n");
-		}
-		printf("\n");
-	} while (0);
+	switch(req->ctrl_code)
+	{
+		case NL60211_CTRL_GET_MAGIC:
+			break;
+		case NL60211_CTRL_DUMP_KERNEL_MSG:
+			break;
+		case NL60211_CTRL_GET_DEBUG_PRINT:
+			break;
+		case NL60211_CTRL_SET_DEBUG_PRINT:
+			req->u.debugPrint = scan_u8(argv[1]);
+			break;
+		case NL60211_CTRL_GET_RECV_PORT_DETECT:
+			break;
+		case NL60211_CTRL_SET_RECV_PORT_DETECT:
+			req->u.recvPortDetect = scan_u8(argv[1]);
+			break;
+		case NL60211_CTRL_SELF_TEST_001:
+		case NL60211_CTRL_SELF_TEST_002:
+		case NL60211_CTRL_SELF_TEST_003:
+		case NL60211_CTRL_SELF_TEST_004:
+			self_test_proc(req->ctrl_code, if_idx);
+			return 0;
+		default:
+			printf("Error: unknown control code!\n");
+			exit(-1);
+	}
+
+	if_nl_send(NL60211_CTRL, if_idx, sizeof(struct nl60211_ctrl_req));
+	if_nl_recv();
+	nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
+	res = (struct nl60211_ctrl_res *)nlres->buf;
+	printf("%-15s = %d\n", "nlmsg_type", nlres->nl_msghdr.nlmsg_type);
+	printf("%-15s = %d\n", "if_index", nlres->if_index);
+	printf("%-15s = %d\n", "return_code", res->return_code);
+	switch(res->ctrl_code)
+	{
+		case NL60211_CTRL_GET_MAGIC:
+			printf("%-15s = %d\n", "magicNum", res->u.magicNum);
+			break;
+		case NL60211_CTRL_DUMP_KERNEL_MSG:
+			break;
+		case NL60211_CTRL_GET_DEBUG_PRINT:
+			printf("%-15s = %d\n", "debugPrint", res->u.debugPrint);
+			break;
+		case NL60211_CTRL_SET_DEBUG_PRINT:
+			break;
+		case NL60211_CTRL_GET_RECV_PORT_DETECT:
+			printf("%-15s = %d\n", "recvPortDetect", res->u.recvPortDetect);
+			break;
+		case NL60211_CTRL_SET_RECV_PORT_DETECT:
+			break;
+		case NL60211_CTRL_SELF_TEST_001:
+			return 0;
+		case NL60211_CTRL_SELF_TEST_002:
+			return 0;
+		case NL60211_CTRL_SELF_TEST_003:
+			return 0;
+		case NL60211_CTRL_SELF_TEST_004:
+			return 0;
+		default:
+			printf("Error: unknown control code!\n");
+			exit(-1);
+	}
 
 	return 0;
 }
@@ -268,7 +287,7 @@ int do_recv(int argc, char **argv)
 	//response
 	struct nl60211msg *nlres;
 	struct nl60211_recv_res *res;
-	unsigned int i, temp;
+	unsigned int i;
 
 	printf("do_recv, idx = %d\n", if_idx);
 	argc--;
@@ -278,16 +297,8 @@ int do_recv(int argc, char **argv)
 		return -1;
 	}
 	req = (struct nl60211_recv_req *)sk_msg_send.nl_msg.buf;
-	if (sscanf(argv[0], "%x", &temp) == 0) {
-		printf("Error: not a hex string!\n");
-		exit(-1);
-	}
-	req->ether_type[0] = (unsigned char)temp;
-	if (sscanf(argv[1], "%x", &temp) == 0) {
-		printf("Error: not a hex string!\n");
-		exit(-1);
-	}
-	req->ether_type[1] = (unsigned char)temp;
+	req->ether_type[0] = scan_x8(argv[0]);
+	req->ether_type[1] = scan_x8(argv[1]);
 	if_nl_send(NL60211_RECV, if_idx, sizeof(struct nl60211_recv_req));
 
 	do {
@@ -318,7 +329,7 @@ int do_recvonce(int argc, char **argv)
 	//response
 	struct nl60211msg *nlres;
 	struct nl60211_recv_res *res;
-	unsigned int i, temp;
+	unsigned int i;
 
 	printf("do_recv, idx = %d\n", if_idx);
 	argc--;
@@ -328,16 +339,8 @@ int do_recvonce(int argc, char **argv)
 		return -1;
 	}
 	req = (struct nl60211_recv_req *)sk_msg_send.nl_msg.buf;
-	if (sscanf(argv[0], "%x", &temp) == 0) {
-		printf("Error: not a hex string!\n");
-		exit(-1);
-	}
-	req->ether_type[0] = (unsigned char)temp;
-	if (sscanf(argv[1], "%x", &temp) == 0) {
-		printf("Error: not a hex string!\n");
-		exit(-1);
-	}
-	req->ether_type[1] = (unsigned char)temp;
+	req->ether_type[0] = scan_x8(argv[0]);
+	req->ether_type[1] = scan_x8(argv[1]);
 	if_nl_send(NL60211_RECV_ONCE, if_idx, sizeof(struct nl60211_recv_req));
 
 	do {
@@ -591,11 +594,7 @@ int do_addmpath(int argc, char **argv)
 		}
 		req->da[i] = (uint8_t)temp;
 	}
-	if (sscanf(argv[i], "%d", &temp) == 0) {
-		printf("Error: not a decimal string!\n");
-		exit(-1);
-	}
-	req->iface_id = (uint16_t)temp;
+	req->iface_id = scan_u16(argv[i]);
 
 	if_nl_send(
 		NL60211_ADD_MPATH,
@@ -635,11 +634,7 @@ int do_delmpath(int argc, char **argv)
 		}
 		req->da[i] = (uint8_t)temp;
 	}
-	if (sscanf(argv[i], "%d", &temp) == 0) {
-		printf("Error: not a decimal string!\n");
-		exit(-1);
-	}
-	req->iface_id = (uint16_t)temp;
+	req->iface_id = scan_u16(argv[i]);
 
 	if_nl_send(
 		NL60211_DEL_MPATH,
@@ -684,11 +679,7 @@ int do_getmpath(int argc, char **argv)
 		}
 		req->da[i] = (uint8_t)temp;
 	}
-	if (sscanf(argv[i], "%d", &temp) == 0) {
-		printf("Error: not a decimal string!\n");
-		exit(-1);
-	}
-	req->iface_id = (uint16_t)temp;
+	req->iface_id = scan_u16(argv[i]);
 
 	if_nl_send(
 		NL60211_GET_MPATH,
@@ -721,7 +712,7 @@ int do_dumpmpath(int argc, char **argv)
 	//response
 	struct nl60211msg *nlres;
 	struct nl60211_getmpath_res *res;
-	int i, temp;
+	//int i, temp;
 
 	if_nl_send(NL60211_DUMP_MPATH, if_idx, 0);
 	printf("%-21s %-10s %-10s %-10s %-10s\n",
@@ -739,7 +730,7 @@ int do_dumpmpath(int argc, char **argv)
 		printf("%02X:%02X:%02X:%02X:%02X:%02X     ",
 		       res->da[0], res->da[1], res->da[2],
 		       res->da[3], res->da[4], res->da[5]);
-		printf("%-10d %-10d %-10d %-10d\n",
+		printf("%-10u %-10u %-10u %-10u\n",
 		       res->sn, res->metric, res->flags, res->iface_id);
 	}
 	return 0;
@@ -811,11 +802,7 @@ int do_plcsetmetric(int argc, char **argv)
 		}
 		req->da[i] = (uint8_t)temp;
 	}
-	if (sscanf(argv[i], "%u", &temp) == 0) {
-		printf("Error: not a decimal string!\n");
-		exit(-1);
-	}
-	req->metric = temp;
+	req->metric = scan_u32(argv[i]);
 
 	if_nl_send(
 		NL60211_PLC_SET_METRIC,
@@ -996,7 +983,7 @@ int do_plcdumpsta(int argc, char **argv)
 	//response
 	struct nl60211msg *nlres;
 	struct nl60211_plcdumpsta_res *res;
-	int i, temp;
+	//int i, temp;
 
 	if_nl_send(NL60211_PLC_DUMP_STA, if_idx, 0);
 	printf("%-21s %-14s %-10s %-10s\n",
@@ -1028,7 +1015,7 @@ int do_plcdumpmpath(int argc, char **argv)
 	//response
 	struct nl60211msg *nlres;
 	struct nl60211_plcdumpmpath_res *res;
-	int i, temp;
+	//int i, temp;
 
 	if_nl_send(NL60211_PLC_DUMP_MPATH, if_idx, 0);
 	printf("%-21s %-21s %-6s %-6s %-10s %-6s %-7s\n",
@@ -1058,7 +1045,7 @@ static const struct cmd {
 	const char *cmd;
 	int (*func)(int argc, char **argv);
 } cmds[] = {
-	{ STR_DEBUG,        do_debug },
+	{ STR_CTRL,         do_ctrl },
 	{ STR_GETMESHID,    do_getmeshid },
 	{ STR_SETMESHID,    do_setmeshid },
 	{ STR_RECV,         do_recv },
@@ -1096,6 +1083,56 @@ static int do_cmd(int argc, char **argv)
 	return EXIT_FAILURE;
 }
 
+THREAD_HANDLE_t gRxThread;
+
+void *Rx_Thread(void *arg)
+{
+	printf("Rx_Thread() start, getpid() = %d\n", getpid());
+	{
+		//request
+		//response
+		struct nl60211msg *nlres;
+		struct nl60211_getmeshid_res *res;
+		
+		if_nl_recv();
+		nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
+		res = (struct nl60211_getmeshid_res *)nlres->buf;
+		printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
+		printf("nlmsg_pid   = %d\n", nlres->nl_msghdr.nlmsg_pid);
+		printf("if_index    = %d\n", nlres->if_index);
+		printf("return_code = %d\n", res->return_code);
+		printf("id_len	    = %d\n", res->id_len);
+		printf("id	    = %s\n", res->id);
+	}
+	return 0;
+}
+
+void self_test(void)
+{
+	int retVal;
+
+	retVal = LibThread_NewHandle(&gRxThread);
+	BASIC_ASSERT(retVal == 0);
+
+
+	retVal = LibThread_Create(gRxThread, Rx_Thread);
+	BASIC_ASSERT(retVal == 0);
+
+	usleep((useconds_t)(1000 * 10));
+
+	if_nl_send(NL60211_GETMESHID, nametoindex("br0"), 0);
+
+
+	LibThread_WaitThread(gRxThread);
+
+
+	retVal = LibThread_DestroyHandle(gRxThread);
+	BASIC_ASSERT(retVal == 0);
+
+	REMOVE_UNUSED_WRANING(retVal);
+}
+
+
 int main(int argc, char **argv)
 {
 	int ret;
@@ -1106,7 +1143,14 @@ int main(int argc, char **argv)
 		printf("argv[1]=%s\n", argv[1]);
 
 	if (argc < 3) {
+		ret = if_nl_init();
+		if (ret) {
+			fprintf(stderr, "if_nl_init() error, ret = %d\n", ret);
+			return ret;
+		}
 		fprintf(stderr, "Too few arguments, exit...\n");
+		//self_test();
+		if_nl_deinit();
 		return -1;
 	}
 
