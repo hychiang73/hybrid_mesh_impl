@@ -14,7 +14,7 @@
 #define MESH_CONF_T		100
 #define MESH_HOLD_T		100
 
-#define MESH_PATH_TIMEOUT	5000
+#define MESH_PATH_TIMEOUT	10000
 #define MESH_DEFAULT_PLINK_TIMEOUT	1800 /* timeout in seconds */
 
 /* Minimum interval between two consecutive PREQs originated
@@ -30,7 +30,7 @@
  * before timing out.  This way it will remain ACTIVE and no data frames
  * will be unnecessarily held in the pending queue.
  */
-#define MESH_PATH_REFRESH_TIME			3000
+#define MESH_PATH_REFRESH_TIME			1000
 #define MESH_MIN_DISCOVERY_TIMEOUT (2 * MESH_DIAM_TRAVERSAL_TIME)
 
 /* Default maximum number of established plinks per interface */
@@ -557,8 +557,6 @@ void ak60211_plcto8023_unencap(struct ak60211_if_data *ifmsh,
 	u8 *pos;
 	u32 plchdrsize;
 
-	PLC_TRACE();
-
 	rmb();
 	pos = skb_mac_header(skb);
 
@@ -676,8 +674,6 @@ int ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 	u16 ethertype, hdrlen = sizeof(struct ethhdr) + sizeof(struct plc_hdr) + sizeof(struct ak60211s_hdr);
 	__le16 fc = 0;
 	bool multicast;
-
-	PLC_TRACE();
 
 	if (!ifmsh->hmc_ops)
 		return 0;

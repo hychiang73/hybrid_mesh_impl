@@ -135,6 +135,7 @@ static u32 ak60211_hwmp_route_info_get(struct ak60211_if_data *ifmsh,
 
 	switch (action) {
 	case AK60211_MPATH_PREQ:
+		plc_info("MPATH_PREQ\n");
 		orig_addr = buff->un.preq.elem.h_origaddr;
 		orig_sn = buff->un.preq.elem.orig_sn;
 		orig_lifetime = buff->un.preq.elem.lifetime;
@@ -142,6 +143,7 @@ static u32 ak60211_hwmp_route_info_get(struct ak60211_if_data *ifmsh,
 		hopcount = buff->un.preq.elem.hop_count + 1;
 		break;
 	case AK60211_MPATH_PREP:
+		plc_info("MPATH_PREP\n");
 		orig_addr = buff->un.prep.elem.h_targetaddr;
 		orig_sn = buff->un.prep.elem.target_sn;
 		orig_lifetime = buff->un.prep.elem.lifetime;
@@ -203,7 +205,8 @@ static u32 ak60211_hwmp_route_info_get(struct ak60211_if_data *ifmsh,
 
 			/* Update path to HMC */
 			if (ifmsh->hmc_ops)
-				ifmsh->hmc_ops->path_update(mpath->dst, mpath->metric, mpath->sn, mpath->flags, HMC_PORT_PLC);
+				ifmsh->hmc_ops->path_update(mpath->dst,
+						mpath->metric, mpath->sn, mpath->flags, HMC_PORT_PLC);
 		} else {
 			spin_unlock_bh(&mpath->state_lock);
 		}

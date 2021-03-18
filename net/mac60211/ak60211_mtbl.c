@@ -310,15 +310,10 @@ void ak60211_mpath_timer(struct timer_list *t)
 		mpath->flags &= ~(PLC_MESH_PATH_RESOLVING | PLC_MESH_PATH_RESOLVING);
 		spin_unlock_bh(&mpath->state_lock);
 	} else if (mpath->discovery_retries < ifmsh->mshcfg.MeshHWMPmaxPREQretries) {
-		//struct hmc_hybrid_path hmpath;
-
-		//memcpy(hmpath.dst, mpath->dst, ETH_ALEN);
-		//hmpath.sn = mpath->sn;
 		++mpath->discovery_retries;
 		mpath->discovery_timeout *= 2;
 		mpath->flags &= ~PLC_MESH_PATH_REQ_QUEUED;
 		spin_unlock_bh(&mpath->state_lock);
-		//__ak60211_mpath_queue_preq_new(ifmsh, &hmpath, 0);
 		__ak60211_mpath_queue_preq(ifmsh, mpath->dst, 0);
 	} else {
 		mpath->flags &= ~(PLC_MESH_PATH_RESOLVING |
@@ -327,14 +322,9 @@ void ak60211_mpath_timer(struct timer_list *t)
 
 		/* Update path to HMC */
 		if (ifmsh->hmc_ops)
-			ifmsh->hmc_ops->path_update(mpath->dst, MAX_METRIC, mpath->sn, mpath->flags, HMC_PORT_PLC);
+			ifmsh->hmc_ops->path_update(mpath->dst,
+					MAX_METRIC, mpath->sn, mpath->flags, HMC_PORT_PLC);
 
-		//memcpy(plc->path->dst, mpath->dst, ETH_ALEN);
-		//plc->path->flags = mpath->flags;
-		//plc->path->sn = mpath->sn;
-		//plc->path->metric = MAX_METRIC;
-		//plc_debug("mpath discovery retry max, stop send preq\n");
-		//br_hmc_path_update(plc);
 		spin_unlock_bh(&mpath->state_lock);
 	}
 }
