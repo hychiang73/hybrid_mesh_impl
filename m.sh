@@ -12,8 +12,7 @@ else
 	rm hmc.tgz
 	find . -name '*.ko' -exec cp "{}" hmc \;
 	# copy nl60211 sample appliction
-	cp net/mac60211/nl60211_uapi.h app/
-	rm -f app/a.out
+	cp net/mac60211/nl60211_uapi.h app/test/include
 	cp -r app hmc
 	tar -zcvf hmc.tgz hmc 
 fi
