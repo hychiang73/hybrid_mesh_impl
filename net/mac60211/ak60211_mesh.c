@@ -666,6 +666,11 @@ int ak60211_mesh_nexthop_lookup(struct ak60211_if_data *ifmsh,
 
 int ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 {
+	/* return value:
+	 * NF_DROP: nexthop resolved failed, no process the skb
+	 * NF_ACCEPT: nexthop resolved success, start to xmit
+	 * -ENOMEN: skb error, free the skb
+	 */
 	struct ak60211_if_data *ifmsh = ak60211_dev_to_ifdata();
 	struct ak60211_mesh_path *mpath = NULL, *mppath = NULL;
 	struct plc_packet_union plcpkts;
@@ -676,7 +681,7 @@ int ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 	bool multicast;
 
 	if (!ifmsh->hmc_ops)
-		return 0;
+		goto resolved_failed;
 
 	/* ak60211_pkt_hex_dump(skb, "ak60211_nexthop_resolved(ORI)", 0); */
 	ethertype = (skb->data[12] << 8) | skb->data[13];
@@ -687,7 +692,7 @@ int ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 	if (!ether_addr_equal(ifmsh->addr, skb->data + ETH_ALEN)) {
 		plc_info("sa is not plc, exit\n");
 		ifmsh->hmc_ops->xmit(skb, iface_id);
-		return 0;
+		goto resolved_failed;
 	}
 
 	if (!is_multicast_ether_addr(skb->data)) {
@@ -792,15 +797,18 @@ int ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 		ifmsh->hmc_ops->xmit(skb, iface_id);
 	} else {
 		plc_err("plc xmit failed\n");
-		ifmsh->hmc_ops->path_del(plcpkts.plchdr.machdr.h_addr3);
-		goto free;
+		// ifmsh->hmc_ops->path_del(plcpkts.plchdr.machdr.h_addr3);
+		goto resolved_failed;
 	}
 
-	return 0;
+	return NF_ACCEPT;
 
 free:
 	kfree_skb(skb);
 	return -ENOMEM;
+
+resolved_failed:
+	return NF_DROP;
 }
 EXPORT_SYMBOL(ak60211_nexthop_resolved);
 

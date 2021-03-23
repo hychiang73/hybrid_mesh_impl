@@ -410,6 +410,10 @@ struct ak60211_mesh_path *ak60211_mpath_lookup(struct ak60211_if_data *ifmsh,
 	if (mpath && ak60211_mpath_expired(mpath)) {
 		spin_lock_bh(&mpath->state_lock);
 		mpath->flags &= ~PLC_MESH_PATH_ACTIVE;
+		if (ifmsh->hmc_ops)
+			ifmsh->hmc_ops->path_update(mpath->dst,
+				mpath->metric, mpath->sn, mpath->flags, HMC_PORT_PLC);
+
 		spin_unlock_bh(&mpath->state_lock);
 	}
 
