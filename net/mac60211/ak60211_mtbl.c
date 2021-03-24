@@ -86,7 +86,7 @@ static int ak60211_sta_info_insert_finish(struct ak60211_sta_info *sta)
 	/* check if STA exists already */
 	if (mesh_info(local, sta->addr)) {
 		err = -EEXIST;
-		plc_err("STA %pM exists already\n", sta->addr);
+		plc_err("STA %pM already exists\n", sta->addr);
 		goto out_err;
 	}
 
@@ -95,7 +95,7 @@ static int ak60211_sta_info_insert_finish(struct ak60211_sta_info *sta)
 
 	err = ak60211_sta_info_hash_add(local, sta);
 	if (err) {
-		plc_err("STA %pM hash add fail\n", sta->addr);
+		plc_err("STA %pM hash add failed\n", sta->addr);
 		goto out_drop_sta;
 	}
 
