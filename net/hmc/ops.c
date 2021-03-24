@@ -12,63 +12,27 @@
 
 #include "hmc.h"
 
-void hmc_ops_wifi_path_del(u8 *proxy)
+void hmc_ops_wifi_path_del(u8 *wmac)
 {
-	int i = 0;
-	struct hmc_fdb_entry *f;
-	struct hmc_core *hmc = to_get_hmc();
-
-	hmc_dbg("delete proxy addr : %pM", proxy);
+	hmc_dbg("delete wifi mesh addr : %pM", wmac);
 
 	rcu_read_lock();
 
-	for (i = 0; i < HMC_HASH_SIZE; i++) {
-		hlist_for_each_entry_rcu(f, &hmc->hash[i], hlist) {
-			if (!is_valid_ether_addr(f->proxy) || is_zero_ether_addr(f->proxy))
-				continue;
+	if (hmc_fdb_del(wmac, HMC_PORT_WIFI) < 0)
+		hmc_err("delete %pM error in hmc tbl", wmac);
 
-			if (ether_addr_equal(f->proxy, proxy) &&
-				(f->iface_id == HMC_PORT_WIFI))  {
-				hmc_info("DA and Pxoxy addr are matched (%pM ---> %pM)", f->proxy, f->addr);
-				hmc_fdb_del(f->addr, HMC_PORT_WIFI);
-				rcu_read_unlock();
-				return;
-			}
-		}
-	}
-
-	hmc_err("Can't find wifi mesh addr (%pM) from hmc tbl", proxy);
 	rcu_read_unlock();
 }
 
 void hmc_ops_wifi_path_update(u8 *proxy, u32 metric, u32 sn, int flags)
 {
-	int i = 0;
-	struct hmc_fdb_entry *f;
-	struct hmc_core *hmc = to_get_hmc();
-
 	hmc_dbg("update wifi mesh addr (%pM)", proxy);
-
-	for (i = 0; i < HMC_HASH_SIZE; i++) {
-		hlist_for_each_entry_rcu(f, &hmc->hash[i], hlist) {
-			if (!is_valid_ether_addr(f->proxy) || is_zero_ether_addr(f->proxy))
-				continue;
-
-			if (ether_addr_equal(f->proxy, proxy) &&
-				(f->iface_id == HMC_PORT_WIFI))  {
-				hmc_info("DA and Pxoxy addr are matched (%pM ---> %pM)", f->proxy, f->addr);
-				hmc_path_update(f->addr, f->proxy, metric, sn, flags, HMC_PORT_WIFI);
-				return;
-			}
-		}
-	}
-
-	hmc_err("Can't find wifi mesh addr (%pM) from hmc tbl", proxy);
+	hmc_path_update(proxy, metric, sn, flags, HMC_PORT_WIFI);
 }
 
 void hmc_ops_plc_path_del(u8 *dst)
 {
-	hmc_dbg("delete dest addr : %pM", dst);
+	hmc_dbg("delete plc mesh addr : %pM", dst);
 
 	rcu_read_lock();
 
@@ -81,7 +45,7 @@ void hmc_ops_plc_path_del(u8 *dst)
 void hmc_ops_plc_path_update(u8 *dst, u32 metric, u32 sn, int flags, int id)
 {
 	hmc_dbg("update plc dest addr: %pM\n", dst);
-	hmc_path_update(dst, dst, metric, sn, flags, HMC_PORT_PLC);
+	hmc_path_update(dst, metric, sn, flags, HMC_PORT_PLC);
 }
 
 int hmc_ops_fdb_dump(struct nl60211_mesh_info *info, int size)
@@ -104,7 +68,6 @@ int hmc_ops_fdb_dump(struct nl60211_mesh_info *info, int size)
 				}
 
 				memcpy(info[idx].dst, f->addr, ETH_ALEN);
-				memcpy(info[idx].proxy, f->proxy, ETH_ALEN);
 				info[idx].metric = f->metric;
 				info[idx].sn = f->sn;
 				info[idx].flags = f->flags;

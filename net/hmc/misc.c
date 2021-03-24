@@ -72,7 +72,6 @@ static void print_fdb_info(struct hmc_fdb_entry *f)
 {
 	hmc_info("=====================================\n");
 	hmc_info("f->dst = %pM", f->addr);
-	hmc_info("f->proxy = %pM", f->proxy);
 	hmc_info("f->sn = %d\n", f->sn);
 	hmc_info("f->metric = %d\n", f->metric);
 	hmc_info("f->flags = %d\n", f->flags);
@@ -270,7 +269,6 @@ static ssize_t br_hmc_proc_test_write(struct file *filp, const char *buff, size_
 				continue;
 
 			hmc_info("info dst = %pM\n", info[i].dst);
-			hmc_info("info proxy = %pM\n", info[i].proxy);
 			hmc_info("info sn = %d\n", info[i].sn);
 			hmc_info("info metric = %d\n", info[i].metric);
 			hmc_info("info flags = %d\n", info[i].flags);
@@ -327,7 +325,7 @@ static ssize_t br_hmc_proc_test_write(struct file *filp, const char *buff, size_
 		print_ppath_info(ppath);
 		ppath->metric = data[i+1];
 		hmc_info("modified da = %pM, metric = %d\n", da, ppath->metric);
-		hmc_path_update(da, da, ppath->metric, ppath->sn, ppath->flags, HMC_PORT_PLC);
+		hmc_path_update(da,ppath->metric, ppath->sn, ppath->flags, HMC_PORT_PLC);
 	}
 
 out:

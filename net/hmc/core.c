@@ -91,16 +91,21 @@ static void fdb_flush_tx_pending(struct hmc_fdb_entry *fdb)
 {
 	struct sk_buff *skb;
 	unsigned long flags;
+	u8 wmac[ETH_ALEN] = {0};
 
 	spin_lock_irqsave(&hmc->queue_lock, flags);
 
-	while ((skb = skb_dequeue(&hmc->frame_queue)) != NULL) {
-		hmc_info("### dequeue skb (%p), addr : %pM, id : %d", skb, fdb->addr, fdb->iface_id);
+	hmc_convert_da_to_wmac(fdb->addr, wmac);
 
-		if (fdb->iface_id == HMC_PORT_PLC && EN_PLC_ENCAP)
-			ak60211_nexthop_resolved(skb, fdb->iface_id);
-		else
-			hmc_xmit(skb, fdb->iface_id);
+	while ((skb = skb_dequeue(&hmc->frame_queue)) != NULL) {
+		hmc_info("### dequeue skb (%p), addr : %pM, port : %d", skb, skb->data, fdb->iface_id);
+		if (ether_addr_equal(fdb->addr, skb->data) ||
+			ether_addr_equal(wmac, skb->data)) {
+			if (fdb->iface_id == HMC_PORT_PLC && EN_PLC_ENCAP)
+				ak60211_nexthop_resolved(skb, fdb->iface_id);
+			else
+				hmc_xmit(skb, fdb->iface_id);
+		} 
 	}
 
 	spin_unlock_irqrestore(&hmc->queue_lock, flags);
@@ -155,7 +160,6 @@ static struct hmc_fdb_entry *fdb_create(struct hlist_head *head, const u8 *addr,
 	fdb = kmem_cache_alloc(hmc_fdb_cache, GFP_ATOMIC);
 	if (!CHECK_MEM(fdb)) {
 		memcpy(fdb->addr, addr, ETH_ALEN);
-		eth_zero_addr(fdb->proxy);
 		fdb->iface_id = iface_id;
 		fdb->sn = 0;
 		fdb->metric = 0xffffffff;
@@ -234,14 +238,14 @@ struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 {
 	int i;
 	struct hmc_fdb_entry *f = NULL, *plc = NULL, *wlan = NULL;
+	u8 wmac[ETH_ALEN] = {0};
+
+	hmc_convert_da_to_wmac(addr, wmac);
 
 	for (i = 0; i < HMC_HASH_SIZE; i++) {
 		hlist_for_each_entry_rcu(f, &hmc->hash[i], hlist) {
-			if (!is_valid_ether_addr(f->addr) || is_zero_ether_addr(f->addr) ||
-				!is_valid_ether_addr(f->proxy) || is_zero_ether_addr(f->proxy))
-				continue;
-
-			if (ether_addr_equal(f->addr, addr) || ether_addr_equal(f->proxy, addr)) {
+			if (ether_addr_equal(f->addr, addr) ||
+				ether_addr_equal(f->addr, wmac)) {
 				if (f->iface_id == HMC_PORT_PLC)
 					plc = f;
 				else if (f->iface_id == HMC_PORT_WIFI)
@@ -269,7 +273,7 @@ struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 	}
 }
 
-void hmc_path_update(u8 *dst, u8 *proxy, u32 metric, u32 sn, int flags, int id)
+void hmc_path_update(u8 *dst, u32 metric, u32 sn, int flags, int id)
 {
 	struct hmc_fdb_entry *fdb;
 
@@ -279,51 +283,46 @@ void hmc_path_update(u8 *dst, u8 *proxy, u32 metric, u32 sn, int flags, int id)
 		return;
 	}
 
-	hmc_dbg("update DA: %pM, Proxy : %pM, id: %d, sn: %d, metric: %d, flags: %d\n",
-			dst, proxy, id, sn, metric, flags);
+	hmc_dbg("update DA: %pM, id: %d, sn: %d, metric: %d, flags: %d\n",
+			dst, id, sn, metric, flags);
 
-	memcpy(fdb->proxy, proxy, ETH_ALEN);
 	fdb->iface_id = id;
 	fdb->sn = sn;
 	fdb->metric = metric;
 	fdb->flags = flags;
 	fdb->exp_time = jiffies;
 
-	if (fdb->flags & MESH_PATH_ACTIVE)
-		fdb_flush_tx_pending(fdb);
+//	if (fdb->flags & MESH_PATH_ACTIVE)
+//		fdb_flush_tx_pending(fdb);
 }
 
-int hmc_wpath_convert_proxy_to_dest(const u8 *proxy, u8 *dst)
+int hmc_convert_da_to_wmac(const u8 *da, u8 *wmac)
 {
-	int ret = -1;
-	struct mesh_path *mpath;
-	struct hlist_node *n;
-	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(hmc->wdev);
-	struct mesh_table *tbl = sdata->u.mesh.mpp_paths;
-	const u8 bitmask[6] = {0xff, 0xff, 0xff, 0x0, 0x0 ,0x0};
-	const u8 nv_ether_id[6] = {0x0, 0x04, 0x4b, 0x0, 0x0, 0x0};
-	bool spin_lock = spin_is_locked(&tbl->walk_lock);
+	struct mesh_path *mpath = NULL;
+	struct mesh_path *mppath = NULL;
+	struct sta_info *next_hop = NULL;
+	bool mpp_lookup = true;
 
-	hmc_dbg("convert proxy addr : %pM, lock = %d\n", proxy, spin_lock);
-
-	if (!spin_lock)
-		spin_lock_bh(&tbl->walk_lock);
-
-	hlist_for_each_entry_safe(mpath, n, &tbl->walk_head, walk_list) {
-		if (ether_addr_equal(mpath->mpp, proxy) &&
-			!ether_addr_equal(mpath->dst, hmc->br_addr) &&
-			ether_addr_equal_masked(mpath->dst, nv_ether_id, bitmask)) {
-			memcpy(dst, mpath->dst, ETH_ALEN);
-			ret = 0;
-			goto out;
-		}
+	mpath = hmc_wpath_lookup(da);
+	if (mpath) {
+		mpp_lookup = false;
+		next_hop = rcu_dereference(mpath->next_hop);
+		if (!next_hop || !(mpath->flags & (MESH_PATH_ACTIVE | MESH_PATH_RESOLVING)))
+			mpp_lookup = true;
 	}
 
-out:
-	if (!spin_lock)
-		spin_unlock_bh(&tbl->walk_lock);
+	if (mpp_lookup)
+		mppath = hmc_wpath_mpp_lookup(da);
 
-	return ret;
+	if (mppath)
+		memcpy(wmac, mppath->mpp, ETH_ALEN);
+	else if (mpath)
+		memcpy(wmac, mppath->dst, ETH_ALEN);
+	else
+		memcpy(wmac, da, ETH_ALEN);
+
+	hmc_info("convert (%pM) --> (%pM)\n", da, wmac);
+	return 0;
 }
 
 struct mesh_path *hmc_wpath_mpp_lookup(const u8 *dst)
@@ -335,7 +334,7 @@ struct mesh_path *hmc_wpath_mpp_lookup(const u8 *dst)
 
 	mpath = mpp_path_lookup(sdata, dst);
 	if (!mpath) {
-		hmc_err("wifi mesh proxy path is not found\n");
+	//	hmc_err("wifi mesh proxy path is not found\n");
 		rcu_read_unlock();
 		return NULL;
 	}
@@ -350,13 +349,13 @@ struct mesh_path *hmc_wpath_lookup(const u8 *dst)
 	struct mesh_path *mpath;
 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(hmc->wdev);
 
-	hmc_info("lookup wifi path : %pM", dst);
+	hmc_dbg("lookup wifi path : %pM", dst);
 
 	rcu_read_lock();
 
 	mpath = mesh_path_lookup(sdata, dst);
 	if (!mpath) {
-		hmc_err("wifi mesh path is not found\n");
+	//	hmc_err("wifi mesh path is not found\n");
 		rcu_read_unlock();
 		return NULL;
 	}
@@ -430,7 +429,6 @@ static int hmc_wlan_path_resolve(struct sk_buff *skb, u8 *addr)
 {
 	struct mesh_path *mmpath = NULL;
 	struct mesh_path *mpath = NULL;
-	struct hmc_fdb_entry *w_fdb;
 	u8 proxy[ETH_ALEN] = {0};
 
 	hmc_dbg("resolve addr : %pM", addr);
@@ -455,8 +453,7 @@ static int hmc_wlan_path_resolve(struct sk_buff *skb, u8 *addr)
 		mpath = hmc_wpath_add(mmpath->mpp);
 	}
 
-	w_fdb = hmc_fdb_insert(addr, HMC_PORT_WIFI);
-	hmc_path_update(addr, proxy, mpath->metric, mpath->sn, mpath->flags, HMC_PORT_WIFI);
+	hmc_path_update(proxy, mpath->metric, mpath->sn, mpath->flags, HMC_PORT_WIFI);
 
 	if (!(mpath->flags & MESH_PATH_RESOLVING)) {
 		hmc_err("callback plc PREQ queue");
@@ -469,8 +466,6 @@ static int hmc_wlan_path_resolve(struct sk_buff *skb, u8 *addr)
 static int hmc_plc_path_resolve(struct sk_buff *skb, u8 *addr)
 {
 	struct ak60211_mesh_path *ppath;
-	struct hmc_fdb_entry *p_fdb;
-	u8 dest[ETH_ALEN] = {0};
 
 	hmc_dbg("resolve addr : %pM", addr);
 
@@ -483,9 +478,7 @@ static int hmc_plc_path_resolve(struct sk_buff *skb, u8 *addr)
 		return NF_QUEUE;
 	}
 
-	memcpy(dest, ppath->dst, ETH_ALEN);
-	p_fdb = hmc_fdb_insert(dest, HMC_PORT_PLC);
-	hmc_path_update(dest, addr, ppath->metric, ppath->sn, ppath->flags, HMC_PORT_PLC);
+	hmc_path_update(addr, ppath->metric, ppath->sn, ppath->flags, HMC_PORT_PLC);
 
 	if (!(ppath->flags & MESH_PATH_RESOLVING)) {
 		hmc_err("callback plc PREQ queue");
@@ -572,7 +565,7 @@ int hmc_br_tx_handler(struct sk_buff *skb)
 	}
 
 queue:
-	hmc_tx_skb_queue(skb);
+//	hmc_tx_skb_queue(skb);
 	hmc_plc_path_resolve(skb, dest);
 	hmc_wlan_path_resolve(skb, dest);
 	return NF_ACCEPT;
