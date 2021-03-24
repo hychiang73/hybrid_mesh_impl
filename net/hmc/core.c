@@ -554,9 +554,9 @@ int hmc_br_tx_handler(struct sk_buff *skb)
 
 	if (fdb->flags & MESH_PATH_ACTIVE) {
 		if (fdb->iface_id == HMC_PORT_PLC && EN_PLC_ENCAP) {
-			if (ak60211_nexthop_resolved(skb, fdb->iface_id) != NF_ACCEPT) {
+			if (ak60211_nexthop_resolved(skb, fdb->iface_id) == NF_DROP) {
 				hmc_err("PLC xmit error! Fix ME !!");
-				//goto queue;
+				goto queue;
 			}
 		} else {
 			hmc_xmit(skb, fdb->iface_id);
