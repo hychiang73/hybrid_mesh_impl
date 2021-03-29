@@ -180,7 +180,8 @@ void test_hmc_gen_pkt(enum hmc_port_egress egress)
 
 	skb_reset_mac_header(new_sk);
 
-	hmc_xmit(new_sk, egress);
+	//hmc_xmit(new_sk, egress);
+	hmc_ops_xmit_create_path(new_sk);
 }
 
 static ssize_t br_hmc_proc_test_read(struct file *filp, char __user *buf, size_t size, loff_t *pos)

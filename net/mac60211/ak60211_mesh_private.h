@@ -256,6 +256,7 @@ struct ak60211_hmc_ops {
 	void (*path_update)(u8 *addr, u32 metric, u32 sn, int flags, int id);
 	void (*path_del)(u8 *dst);
 	int (*xmit)(struct sk_buff *skb, int egress);
+	int (*xmit_cp)(struct sk_buff *skb);
 	int (*fdb_insert)(const u8 *addr, u16 id);
 	int (*fdb_lookup)(struct hmc_fdb_entry *f, const u8 *addr, u16 id);
 	int (*fdb_del)(const u8 *addr, u16 id);

@@ -118,6 +118,14 @@ int hmc_ops_xmit(struct sk_buff *skb, int egress)
 	return hmc_xmit(skb, egress);
 }
 
+int hmc_ops_xmit_create_path(struct sk_buff *skb)
+{
+	if (CHECK_MEM(skb))
+		return -ENOMEM;
+
+	return hmc_br_tx_handler(skb);
+}
+
 int hmc_ops_fdb_del(const u8 *addr, u16 id)
 {
 	HMC_TRACE();
@@ -137,6 +145,7 @@ static const struct ak60211_hmc_ops ak_hmc_ops = {
 	.path_update = hmc_ops_plc_path_update,
 	.path_del = hmc_ops_plc_path_del,
 	.xmit = hmc_ops_xmit,
+	.xmit_cp = hmc_ops_xmit_create_path,
 	.fdb_insert = hmc_ops_fdb_insert,
 	.fdb_del = hmc_ops_fdb_del,
 	.fdb_dump = hmc_ops_fdb_dump,

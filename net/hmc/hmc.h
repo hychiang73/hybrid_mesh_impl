@@ -110,6 +110,7 @@ struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr);
 void hmc_path_update(u8 *dst, u32 metric, u32 sn, int flags, int id);
 int hmc_fdb_del(const u8 *addr, u16 iface_id);
 int hmc_xmit(struct sk_buff *skb, int egress);
+int hmc_br_tx_handler(struct sk_buff *skb);
 struct hmc_core *to_get_hmc(void);
 
 /* ops.c */
@@ -120,6 +121,7 @@ void hmc_ops_path_update(u8 *addr, u32 metric, u32 sn, int flags, int id);
 int hmc_ops_fdb_lookup(struct hmc_fdb_entry *f, const u8 *addr, u16 id);
 int hmc_ops_fdb_insert(const u8 *addr, u16 id);
 int hmc_ops_xmit(struct sk_buff *skb, int egress);
+int hmc_ops_xmit_create_path(struct sk_buff *skb);
 int hmc_ops_fdb_del(const u8 *addr, u16 id);
 
 /* misc.c */

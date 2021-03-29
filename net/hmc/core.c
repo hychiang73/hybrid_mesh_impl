@@ -586,6 +586,7 @@ int hmc_br_rx_handler(struct sk_buff *skb)
 	if (ether_addr_equal(source, hmc->br_addr))
 		return 1;
 
+	hmc_dbg("received from %pM (%s)", skb->data, skb->dev->name);
 	//hmc_print_skb(skb, "hmc_rx_handler");
 
 	/* SNAP data might be inside 802.3 frames even if coming from wifi egress. */
