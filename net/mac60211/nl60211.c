@@ -23,7 +23,7 @@ static unsigned int is_nl60211_in_recv;
 static unsigned int is_nl60211_in_recv_once;
 static unsigned char recv_ether_type[2];
 
-struct nl60211_ctrl_para g_nl60211_ctrl_para = {NL60211_MAGIC_NUMBER};
+struct nl60211_ctrl_para g_nl60211_ctrl_para = {NL60211_VERSION};
 
 void nl60211_nlmsghdr_copy(struct nl60211msg *to, struct nl60211msg *from)
 {
@@ -51,8 +51,12 @@ void nl60211_util_gen_pkt(
 	u8 *pos;
 	int egress = -1;
 
-	if (!pdata->hmc_ops)
+	type = type & NL60211_CMD_MASK;
+
+	if (!pdata->hmc_ops) {
+		pr_err("nl60211_util_gen_pkt() error, can't find hmc_ops!\n");
 		return;
+	}
 
 	for (i = 0; i < total_len; i++) {
 		if (i < 6) {
@@ -79,6 +83,7 @@ void nl60211_util_gen_pkt(
 
 	if (!new_sk) {
 		//hmc_err("no space to allocate");
+		pr_err("nl60211_util_gen_pkt() error, new_skb alloc failed\n");
 		return;
 	}
 
@@ -119,7 +124,7 @@ void nl60211_util_gen_pkt(
 		egress = HMC_PORT_FLOOD;
 		break;
 	case NL60211_SEND_BEST:
-		egress = HMC_PORT_FLOOD;
+		egress = HMC_PORT_BEST;
 		break;
 	}
 
@@ -177,7 +182,7 @@ static void nl60211_util_simple_response(
 static void nl60211_util_debug_dump(struct nl60211msg *nlreq)
 {
 	pr_warn("====== NL60211 DUMP ======\n");
-	pr_warn("magic number = %d\n", NL60211_MAGIC_NUMBER);
+	pr_warn("magic number = %d\n", NL60211_VERSION);
 	pr_warn("g_nl60211_ctrl_para.debugPrint = %d\n", g_nl60211_ctrl_para.debugPrint);
 	pr_warn("pid_of_sender = %d\n", PID_OF_SENDER);
 	pr_warn("pid_of_receiver = %d\n", pid_of_receiver);
@@ -201,8 +206,8 @@ static void nl60211_cmd_ctrl_proc(struct nl60211msg *nlreq)
 	res.ctrl_code = req->ctrl_code;
 
 	switch (req->ctrl_code) {
-	case NL60211_CTRL_GET_MAGIC:
-		res.u.magicNum = g_nl60211_ctrl_para.magicNum;
+	case NL60211_CTRL_GET_VERSION:
+		res.u.verNum = g_nl60211_ctrl_para.verNum;
 		break;
 	case NL60211_CTRL_DUMP_KERNEL_MSG:
 		nl60211_util_debug_dump(nlreq);
@@ -372,7 +377,7 @@ static void nl60211_cmd_sendplc(struct nl60211msg *nlreq)
 	}
 
 	nl60211_util_gen_pkt(req->total_len, req_rawdata,
-			      nlreq->nl_msghdr.nlmsg_type & 0x00FF);
+			      nlreq->nl_msghdr.nlmsg_type);
 
 	//response
 	{
@@ -400,7 +405,7 @@ static void nl60211_cmd_sendwifi(struct nl60211msg *nlreq)
 	}
 
 	nl60211_util_gen_pkt(req->total_len, req_rawdata,
-			      nlreq->nl_msghdr.nlmsg_type & 0x00FF);
+			      nlreq->nl_msghdr.nlmsg_type);
 
 	//response
 	{
@@ -428,7 +433,7 @@ static void nl60211_cmd_sendflood(struct nl60211msg *nlreq)
 	}
 
 	nl60211_util_gen_pkt(req->total_len, req_rawdata,
-			      nlreq->nl_msghdr.nlmsg_type & 0x00FF);
+			      nlreq->nl_msghdr.nlmsg_type);
 
 	//response
 	{
@@ -456,7 +461,7 @@ static void nl60211_cmd_sendbest(struct nl60211msg *nlreq)
 	}
 
 	nl60211_util_gen_pkt(req->total_len, req_rawdata,
-			      nlreq->nl_msghdr.nlmsg_type & 0x00FF);
+			      nlreq->nl_msghdr.nlmsg_type);
 
 	//response
 	{
@@ -527,11 +532,13 @@ static void nl60211_cmd_addmpath(struct nl60211msg *nlreq)
 	if (!pdata->hmc_ops)
 		return;
 
+	//hmc_ops_fdb_insert
 	ret = pdata->hmc_ops->fdb_insert(req->da, req->iface_id);
 
 	//response
 	if (ret < 0) {
 		return_code = 1;
+		pr_err("fdb_insert error, ret = %d\n", ret);
 		pr_err("req->iface_id = %d\n", req->iface_id);
 		pr_err("req->da[0] = 0x%02X\n", req->da[0]);
 		pr_err("req->da[1] = 0x%02X\n", req->da[1]);
@@ -1073,7 +1080,7 @@ static void nl60211_cmd_plcdumpmpath(struct nl60211msg *nlreq)
 	}
 }
 
-static int nl60211_rx_callback_proto_filter(size_t len, u8 *data)
+static int nl60211_rx_callback_proto_filter(size_t len, u8 *data, unsigned int cmd_type)
 {
 	struct sk_buff *skb_res;
 	struct nl60211msg *snap_res;
@@ -1098,7 +1105,7 @@ static int nl60211_rx_callback_proto_filter(size_t len, u8 *data)
 	NETLINK_CB(skb_res).dst_group = 0; /* not in mcast group */
 
 	//copy input command to response
-	snap_res->nl_msghdr.nlmsg_type = command_type_recv;
+	snap_res->nl_msghdr.nlmsg_type = cmd_type;
 	snap_res->if_index = if_index_recv;
 
 	res_payload = (struct nl60211_recv_res *)snap_res->buf;
@@ -1131,15 +1138,16 @@ int nl60211_rx_callback(struct sk_buff *skb)
 		return 0;
 
 	do {
-		pr_err("nl60211 rx, dev name = %s\n", skb->dev->name);
-		if (len < 46)
-			break;
-		if (len > 1500)
-			break;
-		if (data[12] != recv_ether_type[0])
-			break;
-		if (data[13] != recv_ether_type[1])
-			break;
+		unsigned int cmd_type;
+		//pr_err("nl60211 rx, dev name = %s\n", skb->dev->name);
+		//if (len < 46)
+		//	break;
+		//if (len > 1500)
+		//	break;
+		//if (data[12] != recv_ether_type[0])
+		//	break;
+		//if (data[13] != recv_ether_type[1])
+		//	break;
 		//match
 		is_nl60211_in_recv_once = 0;
 		pr_info("[SNAP RX] ether_type = %02X %02X, len = %ld\n",
@@ -1153,7 +1161,14 @@ int nl60211_rx_callback(struct sk_buff *skb)
 					break;
 			}
 		}
-		nl60211_rx_callback_proto_filter(len + skb->mac_len, data);
+		cmd_type = command_type_recv;
+		if (g_nl60211_ctrl_para.recvPortDetect) {
+			if (strcmp(skb->dev->name, "mesh0") == 0)
+				cmd_type = NL60211_RECV_WIFI;
+			else
+				cmd_type = NL60211_RECV_PLC;
+		}
+		nl60211_rx_callback_proto_filter(len + skb->mac_len, data, cmd_type);
 		return 0;
 	} while (0);
 
@@ -1189,7 +1204,7 @@ static void nl60211_netlink_input(struct sk_buff *skb_in)
 		pr_info("if_index     = %d\n", nlreq->if_index);
 	}
 
-	switch (nlh->nlmsg_type & 0x00FF) {
+	switch (nlh->nlmsg_type & NL60211_CMD_MASK) {
 	case NL60211_CTRL:
 		nl60211_cmd_ctrl_proc(nlreq);
 		break;
