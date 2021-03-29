@@ -10,9 +10,8 @@ else
 	make KLIB_BUILD=$JETSON_NANO_KERNEL_SOURCE ARCH=arm64 CROSS_COMPILE=${TOOLCHAIN_PREFIX} -j8
 	rm hmc/*.ko
 	rm hmc.tgz
-	find . -name '*.ko' -exec cp "{}" hmc \;
+	find . -name '*.ko' -exec cp "{}" hmc/modules/ \;
 	# copy nl60211 sample appliction
 	cp net/mac60211/nl60211_uapi.h app/test/include
-	cp -r app hmc
 	tar -zcvf hmc.tgz hmc 
 fi

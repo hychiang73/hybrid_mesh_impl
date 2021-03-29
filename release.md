@@ -1,3 +1,14 @@
+* v0.4
+  * [HMC] Fix queued & dequeued skb problem
+  * [HMC] Fix getting wrong destination address from proxy table in wifi mesh
+  * [HMC] Forward to wlan egress when eth was unplugged
+  * [HMC] HMC table stores bridge and wifi mac address as destination address 
+  * [NL60211] Update nl60211_uapi.h for the use of user applications
+  * [NL60211] Add self test
+  * [AK60211] Delete plc path when the plc station restarts or is not found
+  * [AK60211] Fix some issues in transmittion between 802.3 and 602.11 (enabled as default)
+  * [AK60211] Don't modify skb data when a plc path is inactive or doesn't exist
+---
 * v0.3
   * [HMC] Rewrite hybrid mesh architecture
   * [HMC] Able to switch plc/wifi egress by its metric dynamactically

@@ -5,13 +5,27 @@
 #
 #!/bin/sh
 
-OUT=hmc
+OUT=$(pwd)/hmc/modules
+HMC_TAR=hmc.tgz
+FILE=`find . -name $HMC_TAR -print -quit`
 BR_IP=192.168.90.10
 MESH_ID=mymesh
 
+if [ -n "$FILE" ]; then
+	echo "=== Found $HMC_TAR ==="
+else
+	echo "=== Not found $HMC_TAR ==="
+	exit
+fi
+
+if [ -d $OUT ]; then
+	echo "=== Found $OUT ==="
+else
+	echo "=== Not found $OUT ==="
+	exit
+fi
+
 rm -rf hmc
-#rm -rf hmc.tgz
-#cp ~/hmc.tgz .
 tar -xvf hmc.tgz
 
 sudo rmmod hmc
