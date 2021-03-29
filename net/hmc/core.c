@@ -648,7 +648,7 @@ static int __init hmc_core_init(void)
 {
 	int ret = 0;
 
-	hmc_info("hybrid mesh core init\n");
+	hmc_info("hybrid mesh core version %s\n", HMC_VERSION);
 
 	hmc = kzalloc(sizeof(*hmc), GFP_KERNEL);
 	if (CHECK_MEM(hmc)) {
