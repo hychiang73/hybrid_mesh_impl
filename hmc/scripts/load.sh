@@ -5,7 +5,7 @@
 #
 #!/bin/sh
 
-OUT=$(pwd)/hmc/modules
+OUT=$(pwd)/hmc/module
 HMC_TAR=hmc.tgz
 FILE=`find . -name $HMC_TAR -print -quit`
 BR_IP=192.168.90.10

@@ -5,7 +5,7 @@
 #
 #!/bin/sh
 
-OUT=$(pwd)/hmc/modules
+OUT=$(pwd)/hmc/module
 BR_IP=192.168.90.10
 MESH_ID=mymesh
 
