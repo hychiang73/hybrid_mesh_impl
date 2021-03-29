@@ -12,51 +12,27 @@
 
 #include "hmc.h"
 
-void hmc_ops_wifi_path_del(u8 *proxy)
+void hmc_ops_wifi_path_del(u8 *wmac)
 {
-	struct hmc_fdb_entry *fdb;
-	u8 dst[ETH_ALEN] = {0};
-	bool is_proxy = false;
-
-	hmc_dbg("delete proxy addr : %pM", proxy);
+	hmc_dbg("delete wifi mesh addr : %pM", wmac);
 
 	rcu_read_lock();
 
-	fdb = hmc_fdb_lookup(proxy, HMC_PORT_WIFI);
-	if (!fdb) {
-		if (hmc_wpath_convert_proxy_to_dest(proxy, dst) < 0) {
-			hmc_info("Not found an appropriate dest addr, ignore");
-			rcu_read_unlock();
-			return;
-		}
-		is_proxy = true;
-	}
-
-	if (is_proxy)
-		hmc_fdb_del(dst, HMC_PORT_WIFI);
-	else
-		hmc_fdb_del(proxy, HMC_PORT_WIFI);
+	if (hmc_fdb_del(wmac, HMC_PORT_WIFI) < 0)
+		hmc_err("delete %pM error in hmc tbl", wmac);
 
 	rcu_read_unlock();
 }
 
 void hmc_ops_wifi_path_update(u8 *proxy, u32 metric, u32 sn, int flags)
 {
-	u8 dst[ETH_ALEN] = {0};
-
-	hmc_dbg("update wifi proxy addr (%pM) to an appropriate dest addr", proxy);
-
-	if (hmc_wpath_convert_proxy_to_dest(proxy, dst) < 0) {
-		hmc_err("Not found dst in proxy tbl in wifi mesh, ignore\n");
-		return;
-	}
-
-	hmc_wpath_update(dst, metric, sn, flags, HMC_PORT_WIFI);
+	hmc_dbg("update wifi mesh addr (%pM)", proxy);
+	hmc_path_update(proxy, metric, sn, flags, HMC_PORT_WIFI);
 }
 
 void hmc_ops_plc_path_del(u8 *dst)
 {
-	hmc_dbg("delete dest addr : %pM", dst);
+	hmc_dbg("delete plc mesh addr : %pM", dst);
 
 	rcu_read_lock();
 
@@ -69,7 +45,6 @@ void hmc_ops_plc_path_del(u8 *dst)
 void hmc_ops_plc_path_update(u8 *dst, u32 metric, u32 sn, int flags, int id)
 {
 	hmc_dbg("update plc dest addr: %pM\n", dst);
-
 	hmc_path_update(dst, metric, sn, flags, HMC_PORT_PLC);
 }
 
@@ -143,6 +118,14 @@ int hmc_ops_xmit(struct sk_buff *skb, int egress)
 	return hmc_xmit(skb, egress);
 }
 
+int hmc_ops_xmit_create_path(struct sk_buff *skb)
+{
+	if (CHECK_MEM(skb))
+		return -ENOMEM;
+
+	return hmc_br_tx_handler(skb);
+}
+
 int hmc_ops_fdb_del(const u8 *addr, u16 id)
 {
 	HMC_TRACE();
@@ -162,6 +145,7 @@ static const struct ak60211_hmc_ops ak_hmc_ops = {
 	.path_update = hmc_ops_plc_path_update,
 	.path_del = hmc_ops_plc_path_del,
 	.xmit = hmc_ops_xmit,
+	.xmit_cp = hmc_ops_xmit_create_path,
 	.fdb_insert = hmc_ops_fdb_insert,
 	.fdb_del = hmc_ops_fdb_del,
 	.fdb_dump = hmc_ops_fdb_dump,

@@ -5,14 +5,16 @@
 #
 #!/bin/sh
 
-OUT=hmc
+OUT=$(pwd)/hmc/module
 BR_IP=192.168.90.10
 MESH_ID=mymesh
 
-#rm -rf hmc
-#rm -rf hmc.tgz
-#cp ~/hmc.tgz .
-#tar -xvf hmc.tgz
+if [ -d $OUT ]; then
+	echo "=== Found $OUT ==="
+else
+	echo "=== Not found $OUT ==="
+	exit
+fi
 
 echo "Remove hmc module"
 sudo rmmod hmc

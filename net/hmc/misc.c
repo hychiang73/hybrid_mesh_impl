@@ -71,7 +71,7 @@ EXPORT_SYMBOL(hmc_print_skb);
 static void print_fdb_info(struct hmc_fdb_entry *f)
 {
 	hmc_info("=====================================\n");
-	hmc_info("f->dst = %x.%x.%x.%x.%x.%x\n", f->addr[0],f->addr[1],f->addr[2], f->addr[3],f->addr[4],f->addr[5]);
+	hmc_info("f->dst = %pM", f->addr);
 	hmc_info("f->sn = %d\n", f->sn);
 	hmc_info("f->metric = %d\n", f->metric);
 	hmc_info("f->flags = %d\n", f->flags);
@@ -154,6 +154,8 @@ void test_hmc_gen_pkt(enum hmc_port_egress egress)
 		memcpy(da, wlan_mac, ETH_ALEN);
 	else if (egress == HMC_PORT_FLOOD)
 		memcpy(da, broadcast, ETH_ALEN);
+	else if (egress == HMC_PORT_BEST)
+		memcpy(da, eth_mac, ETH_ALEN);
 	else {
 		hmc_err("Unknown egress id\n");
 		return;
@@ -178,7 +180,8 @@ void test_hmc_gen_pkt(enum hmc_port_egress egress)
 
 	skb_reset_mac_header(new_sk);
 
-	hmc_xmit(new_sk, egress);
+	//hmc_xmit(new_sk, egress);
+	hmc_ops_xmit_create_path(new_sk);
 }
 
 static ssize_t br_hmc_proc_test_read(struct file *filp, char __user *buf, size_t size, loff_t *pos)
@@ -266,7 +269,7 @@ static ssize_t br_hmc_proc_test_write(struct file *filp, const char *buff, size_
 			if (info[i].iface_id == 0)
 				continue;
 
-			hmc_info("info dst = %x.%x.%x.%x.%x.%x\n", info[i].dst[0], info[i].dst[1], info[i].dst[2], info[i].dst[3], info[i].dst[4], info[i].dst[5]);
+			hmc_info("info dst = %pM\n", info[i].dst);
 			hmc_info("info sn = %d\n", info[i].sn);
 			hmc_info("info metric = %d\n", info[i].metric);
 			hmc_info("info flags = %d\n", info[i].flags);
@@ -323,7 +326,7 @@ static ssize_t br_hmc_proc_test_write(struct file *filp, const char *buff, size_
 		print_ppath_info(ppath);
 		ppath->metric = data[i+1];
 		hmc_info("modified da = %pM, metric = %d\n", da, ppath->metric);
-		hmc_path_update(da, ppath->metric, ppath->sn, ppath->flags, HMC_PORT_PLC);
+		hmc_path_update(da,ppath->metric, ppath->sn, ppath->flags, HMC_PORT_PLC);
 	}
 
 out:

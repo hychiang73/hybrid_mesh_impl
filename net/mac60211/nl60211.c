@@ -1,320 +1,38 @@
 #define IN_JETSON (1)
 
 #if IN_JETSON
-#include "nl60211.h"
 #include "../hmc/hmc.h"
 #include "mac60211.h"
 #include "ak60211_mesh_private.h"
+#include "nl60211.h"
+#include "nl60211_uapi.h"
 #endif
-
 #include <linux/module.h>
 #include <net/sock.h>
-#include <linux/netlink.h>
 #include <linux/skbuff.h>
 
-//
-//ref: netlink.h
-//
-#define NETLINK_60211 (MAX_LINKS - 1)
-// nlmsg_type[15:8] is snap command flag
-#define NL60211FLAG_NO_RESPONSE 0x8000
-// nlmsg_type[7:0] is snap command enum
-enum {
-	NL60211_DEBUG = 0,     // a.out debug       br0 ...
-	NL60211_GETMESHID,     // a.out getmeshid   br0
-	NL60211_SETMESHID,     // a.out setmeshid   br0 mymesh0
-	NL60211_RECV,          // a.out recv        br0 AA 66
-	NL60211_RECV_ONCE,     // a.out recvonce    br0 AA 66
-	NL60211_RECV_CANCEL,   // a.out recvcancel  br0
-	NL60211_SEND_PLC,      // a.out sendplc     br0 [da] [sa] [eth type] ...
-	NL60211_SEND_WIFI,     // a.out sendwifi    br0 [da] [sa] [eth type] ...
-	NL60211_SEND_FLOOD,    // a.out sendflood   br0 [da] [sa] [eth type] ...
-	NL60211_SEND_BEST,     // a.out sendbest    br0 [da] [sa] [eth type] ...
-	NL60211_GETSA,         // a.out getsa       br0
+#define PID_OF_SENDER  nlreq->nl_msghdr.nlmsg_pid
+#define IF_INDEX       nlreq->if_index
+#define COMMAND_TYPE   nlreq->nl_msghdr.nlmsg_type
 
-	NL60211_ADD_MPATH,     // a.out addmpath    br0 [da] [if]
-	NL60211_DEL_MPATH,     // a.out delmpath    br0 [da] [if]
-	NL60211_SET_MPATH,     // reserved
-	NL60211_GET_MPATH,     // a.out getmpath    br0 [da] [if]
-	NL60211_DUMP_MPATH,    // a.out dumpmpath   br0
+static struct sock *nl_sk;
+static int pid_of_receiver;
+static unsigned int if_index_recv;
+static unsigned int command_type_recv;
+static unsigned int is_nl60211_in_recv;
+static unsigned int is_nl60211_in_recv_once;
+static unsigned char recv_ether_type[2];
 
-	NL60211_PLC_GET_METRIC, // a.out plcgetmetric br0 [da]
-	NL60211_PLC_SET_METRIC, // a.out plcsetmetric br0 [da] [metric]
-	NL60211_PLC_GET_MPARA,  // a.out plcgetmpara  br0 mpara_flag
-	NL60211_PLC_SET_MPARA,  // a.out plcsetmpara  br0 mpara_flag value
-	NL60211_PLC_DUMP_STA,   // a.out plcdumpsta   br0
-	NL60211_PLC_DUMP_MPATH, // a.out plcdumpmpath br0
-};
+struct nl60211_ctrl_para g_nl60211_ctrl_para = {NL60211_VERSION};
 
-// from private structure: ak60211_mesh_config
-struct plc_mesh_config {
-	u16 MeshRetryTimeout;
-	u16 MeshConfirmTimeout;
-	u16 MeshHoldingTimeout;
-	u16 MeshMaxPeerLinks;
-	u8 MeshMaxRetries;
-	u8 MeshTTL;
-	u8 element_ttl;
-	u8 MeshHWMPmaxPREQretries;
-	u32 path_refresh_time;
-	u16 min_discovery_timeout;
-	u32 MeshHWMPactivePathTimeout;
-	u16 MeshHWMPpreqMinInterval;
-	u16 MeshHWMPperrMinInterval;
-	u16 MeshHWMPnetDiameterTraversalTime;
-	s32 rssi_threshold;
-	u32 plink_timeout;
-	u16 beacon_interval;
-};
+void nl60211_nlmsghdr_copy(struct nl60211msg *to, struct nl60211msg *from)
+{
+	to->nl_msghdr.nlmsg_type = from->nl_msghdr.nlmsg_type;
+	to->nl_msghdr.nlmsg_pid = from->nl_msghdr.nlmsg_pid;
+	to->if_index = from->if_index;
+}
 
-// inside nl60211msg.buf
-// response
-struct nl60211_debug_res {
-	s32    return_code;
-	u32    len;
-	char   buf[];
-};
-
-struct nl60211_getmeshid_res {
-	s32    return_code;
-	u32    id_len;
-	char   id[];
-};
-
-struct nl60211_setmeshid_res {
-	s32    return_code;
-};
-
-struct nl60211_recv_res {
-	s32    return_code;
-	u32    recv_len;
-	u8     recv_buf[];
-};
-
-struct nl60211_recvonce_res {
-	s32    return_code;
-	u32    recv_len;
-	u8     recv_buf[];
-};
-
-struct nl60211_recvcancel_res {
-	s32    return_code;
-};
-
-struct nl60211_sendplc_res {
-	s32    return_code;
-};
-
-struct nl60211_sendwifi_res {
-	s32    return_code;
-};
-
-struct nl60211_sendflood_res {
-	s32    return_code;
-};
-
-struct nl60211_sendbest_res {
-	s32    return_code;
-};
-
-struct nl60211_getsa_res {
-	s32    return_code;
-	u32    sa_len;
-	u8     sa[];
-};
-
-struct nl60211_addmpath_res {
-	s32    return_code;
-};
-
-struct nl60211_delmpath_res {
-	s32    return_code;
-};
-
-struct nl60211_setmpath_res {
-	s32    return_code;
-};
-
-struct nl60211_getmpath_res {
-	s32    return_code;
-	u8     da[ETH_ALEN];
-	u16    iface_id;
-	u32    sn;
-	u32    metric;
-	u32    flags;
-	unsigned long exp_time;
-};
-
-struct nl60211_dumpmpath_res {
-	s32    return_code;
-	u8     da[ETH_ALEN];
-	u16    iface_id;
-	u32    sn;
-	u32    metric;
-	u32    flags;
-	unsigned long exp_time;
-};
-
-struct nl60211_plcgetmetric_res {
-	s32    return_code;
-	u32    metric;
-};
-
-struct nl60211_plcsetmetric_res {
-	s32    return_code;
-};
-
-struct nl60211_plcgetmpara_res {
-	s32    return_code;
-	u32    param_flags;
-	struct plc_mesh_config cfg;
-};
-
-struct nl60211_plcsetmpara_res {
-	s32    return_code;
-};
-
-struct nl60211_plcdumpsta_res {
-	s32    return_code;
-	u8     addr[ETH_ALEN];
-	u32    plink_state;
-	u16    llid;
-	u16    plid;
-};
-
-// ref: struct ak60211_mesh_path
-struct nl60211_plcdumpmpath_res {
-	s32    return_code;
-	u8     da[ETH_ALEN];
-	u8     next_hop[ETH_ALEN];
-	u32    sn;
-	u32    metric;
-	u8     hop_count;
-	unsigned long exp_time;
-	u32    discovery_timeout;
-	u8     discovery_retries;
-	u32    flags;
-	u32    is_root;
-};
-
-// request
-struct nl60211_debug_req {
-	u32    len;
-	u8     buf[];
-};
-
-struct nl60211_getmeshid_req {
-};
-
-struct nl60211_setmeshid_req {
-	u32    id_len;
-	char   id[];
-};
-
-struct nl60211_recv_req {
-	u8     ether_type[2];
-};
-
-struct nl60211_recvonce_req {
-	u8     ether_type[2];
-};
-
-struct nl60211_recvcancel_req {
-};
-
-struct nl60211_sendplc_req {
-	u32    total_len;
-	u8     da[6];
-	u8     sa[6];
-	u8     ether_type[2];
-	u8     payload[];
-};
-
-struct nl60211_sendwifi_req {
-	u32    total_len;
-	u8     da[6];
-	u8     sa[6];
-	u8     ether_type[2];
-	u8     payload[];
-};
-
-struct nl60211_sendflood_req {
-	u32    total_len;
-	u8     da[6];
-	u8     sa[6];
-	u8     ether_type[2];
-	u8     payload[];
-};
-
-struct nl60211_sendbest_req {
-	u32    total_len;
-	u8     da[6];
-	u8     sa[6];
-	u8     ether_type[2];
-	u8     payload[];
-};
-
-struct nl60211_getsa_req {
-};
-
-struct nl60211_addmpath_req {
-	u8     da[ETH_ALEN];
-	u16    iface_id;
-};
-
-struct nl60211_delmpath_req {
-	u8     da[ETH_ALEN];
-	u16    iface_id;
-};
-
-struct nl60211_setmpath_req {
-};
-
-struct nl60211_getmpath_req {
-	u8     da[ETH_ALEN];
-	u16    iface_id;
-};
-
-struct nl60211_dumpmpath_req {
-};
-
-struct nl60211_plcgetmetric_req {
-	u8     da[ETH_ALEN];
-};
-
-struct nl60211_plcsetmetric_req {
-	u8     da[ETH_ALEN];
-	u32    metric;
-};
-
-struct nl60211_plcgetmpara_req {
-	u32    param_flags;
-};
-
-struct nl60211_plcsetmpara_req {
-	u32    param_flags;
-	struct plc_mesh_config cfg;
-};
-
-struct nl60211_plcdumpsta_req {
-};
-
-struct nl60211_plcdumpmpath_req {
-};
-
-#define MAX_PAYLOAD 2048 /* maximum payload size for request&response */
-
-// This buffer is for tx & "rx".
-// And it contains socket message header:"struct msghdr" for simplifying.
-struct nl60211msg {
-	struct nlmsghdr     nl_msghdr;
-	// netlink payload start
-	unsigned int        if_index;
-	char                buf[MAX_PAYLOAD];
-	// netlink payload end
-};
-
-void test_hmc_gen_pkt_snap(
+void nl60211_util_gen_pkt(
 	unsigned int total_len,
 	unsigned char *raw,
 	u32 type)
@@ -333,8 +51,12 @@ void test_hmc_gen_pkt_snap(
 	u8 *pos;
 	int egress = -1;
 
-	if (!pdata->hmc_ops)
+	type = type & NL60211_CMD_MASK;
+
+	if (!pdata->hmc_ops) {
+		pr_err("nl60211_util_gen_pkt() error, can't find hmc_ops!\n");
 		return;
+	}
 
 	for (i = 0; i < total_len; i++) {
 		if (i < 6) {
@@ -361,6 +83,7 @@ void test_hmc_gen_pkt_snap(
 
 	if (!new_sk) {
 		//hmc_err("no space to allocate");
+		pr_err("nl60211_util_gen_pkt() error, new_skb alloc failed\n");
 		return;
 	}
 
@@ -388,7 +111,7 @@ void test_hmc_gen_pkt_snap(
 
 	skb_reset_mac_header(new_sk);
 
-	//hmc_print_skb(new_sk, "test_hmc_gen_pkt_snap");
+	//hmc_print_skb(new_sk, "nl60211_util_gen_pkt");
 
 	switch (type) {
 	case NL60211_SEND_PLC:
@@ -401,7 +124,7 @@ void test_hmc_gen_pkt_snap(
 		egress = HMC_PORT_FLOOD;
 		break;
 	case NL60211_SEND_BEST:
-		egress = HMC_PORT_FLOOD;
+		egress = HMC_PORT_BEST;
 		break;
 	}
 
@@ -409,20 +132,90 @@ void test_hmc_gen_pkt_snap(
 #endif
 }
 
-#define PID_OF_SENDER  nlreq->nl_msghdr.nlmsg_pid
-#define IF_INDEX       nlreq->if_index
-#define COMMAND_TYPE   nlreq->nl_msghdr.nlmsg_type
+void nl60211_util_gen_pkt_cp(
+	unsigned int total_len,
+	unsigned char *raw)
+{
+#if IN_JETSON
+	unsigned int i = 0;
+	unsigned int proto = 0xAA66;
+	struct sk_buff *new_sk;
+	struct ethhdr *ether;
+	struct ak60211_if_data *pdata = ak60211_dev_to_ifdata();
+	//const u8 da[ETH_ALEN] = {0x00,0x04,0x4b,0xe6,0xec,0x3d};
+	//const u8 da[ETH_ALEN] = {0x00,0x19,0x94,0x38,0xfd,0x8e};
+	//const u8 sa[ETH_ALEN] = {0x00,0x04,0x4b,0xec,0x28,0x3b};
+	u8 da[ETH_ALEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+	u8 sa[ETH_ALEN] = {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff};
+	u8 *pos;
 
-static struct sock *nl_sk;
-static int pr_debug_en;
-static int pid_of_receiver;
-static unsigned int if_index_recv;
-static unsigned int command_type_recv;
-static unsigned int is_nl60211_in_recv;
-static unsigned int is_nl60211_in_recv_once;
-static unsigned char recv_ether_type[2];
+	if (!pdata->hmc_ops) {
+		pr_err("nl60211_util_gen_pkt() error, can't find hmc_ops!\n");
+		return;
+	}
 
-static void nl60211_cmd_plc_exp_time_reset(struct ak60211_if_data *ifmsh)
+	for (i = 0; i < total_len; i++) {
+		if (i < 6) {
+			da[i] = raw[i];
+		} else if (i < 12) {
+			sa[i - 6] = raw[i];
+		} else if (i == 12) {
+			proto = proto & 0x00FF;
+			proto = proto | (((unsigned int)raw[i]) << 8);
+		} else if (i == 13) {
+			proto = proto & 0xFF00;
+			proto = proto | (((unsigned int)raw[i]) << 0);
+			i = 14;
+			break;
+		}
+	}
+
+	//TRACE();
+
+	if (total_len > 19)
+		new_sk = dev_alloc_skb(2 + total_len + 2);
+	else
+		new_sk = dev_alloc_skb(128);
+
+	if (!new_sk) {
+		//hmc_err("no space to allocate");
+		pr_err("nl60211_util_gen_pkt() error, new_skb alloc failed\n");
+		return;
+	}
+
+	skb_reserve(new_sk, 2);
+
+	ether = (struct ethhdr *)skb_put(new_sk, ETH_HLEN);
+	//memset(ether, 0, ETH_HLEN);
+
+	memcpy(ether->h_dest, da, ETH_ALEN);
+	memcpy(ether->h_source, sa, ETH_ALEN);
+	ether->h_proto = ntohs(proto);
+
+	if (total_len <= 14) {
+		pos = skb_put(new_sk, 5);
+		*pos++ = 100;
+		*pos++ = 101;
+		*pos++ = 102;
+		*pos++ = 103;
+		*pos++ = 104;
+	} else {
+		pos = skb_put(new_sk, total_len - 14);
+		for (i = i; i < total_len; i++)
+			*pos++ = raw[i];
+	}
+
+	skb_reset_mac_header(new_sk);
+
+	//hmc_print_skb(new_sk, "nl60211_util_gen_pkt");
+
+
+	pdata->hmc_ops->xmit_cp(new_sk);
+#endif
+}
+
+
+static void nl60211_util_plc_exp_time_reset(struct ak60211_if_data *ifmsh)
 {
 	struct ak60211_mesh_path *mpath;
 	struct hlist_node *n;
@@ -437,7 +230,7 @@ static void nl60211_cmd_plc_exp_time_reset(struct ak60211_if_data *ifmsh)
 	spin_unlock_bh(&tbl->walk_lock);
 }
 
-static void nl60211_cmd_simple_response(
+static void nl60211_util_simple_response(
 	struct nl60211msg *nlreq,
 	u32 payload_len,
 	void *payload)
@@ -461,8 +254,7 @@ static void nl60211_cmd_simple_response(
 					       nlmsgsize, 0);
 	NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
 	//copy input command to response
-	nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
-	nlres->if_index = nlreq->if_index;
+	nl60211_nlmsghdr_copy(nlres, nlreq);
 	memcpy(nlres->buf, payload, payload_len);
 	//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
 	ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
@@ -470,11 +262,12 @@ static void nl60211_cmd_simple_response(
 		pr_info("Error while sending back to user\n");
 }
 
-static void nl60211_cmd_debug_dump(struct nl60211msg *nlreq)
+static void nl60211_util_debug_dump(struct nl60211msg *nlreq)
 {
-	pr_warn("====== SNAP DUMP ======\n");
-	pr_warn("magic number = %d\n", 125);
-	pr_warn("pr_debug_en = %d\n", pr_debug_en);
+	pr_warn("====== NL60211 DUMP ======\n");
+	pr_warn("magic number = %d\n", NL60211_VERSION);
+	pr_warn("g_nl60211_ctrl_para.debugPrint = %d\n",
+		g_nl60211_ctrl_para.debugPrint);
 	pr_warn("pid_of_sender = %d\n", PID_OF_SENDER);
 	pr_warn("pid_of_receiver = %d\n", pid_of_receiver);
 	pr_warn("if_index = %u\n", IF_INDEX);
@@ -485,60 +278,43 @@ static void nl60211_cmd_debug_dump(struct nl60211msg *nlreq)
 	pr_warn("recv_ether_type[1] = %u\n", recv_ether_type[1]);
 }
 
-static void nl60211_cmd_debug(struct nl60211msg *nlreq)
+static void nl60211_cmd_ctrl_proc(struct nl60211msg *nlreq)
 {
-	enum {
-		SET_DEBUG_PRINT = 0,
-	};
 	//request
-	struct nl60211_debug_req *req =
-		(struct nl60211_debug_req *)nlreq->buf;
+	struct nl60211_ctrl_req *req =
+		(struct nl60211_ctrl_req *)nlreq->buf;
 	//response
-	//struct sk_buff *skbres;
-	//struct nl60211msg *nlres;
-	//struct nl60211_debug_res *res;
-	struct nl60211_debug_res simpleres;
-	//u32 nlmsgsize;
-	s32 return_code = 0;
-	//int ret;
-	//local
+	struct nl60211_ctrl_res res;
 
-	//request
-	do {
-		if (req->len == 0) {
-			simpleres.return_code = return_code;
-			simpleres.len = 0;
-			nl60211_cmd_debug_dump(nlreq);
+	res.return_code = 0;
+	res.ctrl_code = req->ctrl_code;
 
-			//response
-			nl60211_cmd_simple_response(
-				nlreq,
-				sizeof(simpleres),
-				&simpleres);
-			return;
-		}
-		simpleres.return_code = return_code;
-		simpleres.len = 0;
-		switch (req->buf[0]) {
-		case SET_DEBUG_PRINT:
-			if (req->len >= 2) {
-				pr_debug_en = req->buf[1];
-				nl60211_cmd_debug_dump(nlreq);
-				nl60211_cmd_simple_response(
-					nlreq,
-					sizeof(simpleres),
-					&simpleres);
-				return;
-			}
-			break;
-		}
-		return_code = -1;
-	} while (0);
+	switch (req->ctrl_code) {
+	case NL60211_CTRL_GET_VERSION:
+		res.u.verNum = g_nl60211_ctrl_para.verNum;
+		break;
+	case NL60211_CTRL_DUMP_KERNEL_MSG:
+		nl60211_util_debug_dump(nlreq);
+		break;
+	case NL60211_CTRL_GET_DEBUG_PRINT:
+		res.u.debugPrint = g_nl60211_ctrl_para.debugPrint;
+		break;
+	case NL60211_CTRL_SET_DEBUG_PRINT:
+		g_nl60211_ctrl_para.debugPrint = req->u.debugPrint;
+		break;
+	case NL60211_CTRL_GET_RECV_PORT_DETECT:
+		res.u.recvPortDetect = g_nl60211_ctrl_para.recvPortDetect;
+		break;
+	case NL60211_CTRL_SET_RECV_PORT_DETECT:
+		g_nl60211_ctrl_para.recvPortDetect = req->u.recvPortDetect;
+		break;
+	default:
+		res.return_code = -1;
+		break;
+	}
 
 	//response
-	simpleres.return_code = return_code;
-	simpleres.len = 0;
-	nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
+	nl60211_util_simple_response(nlreq, sizeof(res), &res);
 }
 
 static void nl60211_cmd_getmeshid(struct nl60211msg *nlreq)
@@ -575,8 +351,7 @@ static void nl60211_cmd_getmeshid(struct nl60211msg *nlreq)
 	NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
 
 	//copy input command to response
-	nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
-	nlres->if_index = nlreq->if_index;
+	nl60211_nlmsghdr_copy(nlres, nlreq);
 
 	res = (struct nl60211_getmeshid_res *)nlres->buf;
 	res->return_code = return_code;
@@ -610,7 +385,7 @@ static void nl60211_cmd_setmeshid(struct nl60211msg *nlreq)
 
 	//response
 	simpleres.return_code = return_code;
-	nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
+	nl60211_util_simple_response(nlreq, sizeof(simpleres), &simpleres);
 }
 
 static void nl60211_cmd_recv(struct nl60211msg *nlreq)
@@ -629,7 +404,7 @@ static void nl60211_cmd_recv(struct nl60211msg *nlreq)
 
 	//response
 	//simpleres.return_code = 0;
-	//nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
+	//nl60211_util_simple_response(nlreq, sizeof(simpleres), &simpleres);
 }
 
 static void nl60211_cmd_recv_once(struct nl60211msg *nlreq)
@@ -649,7 +424,7 @@ static void nl60211_cmd_recv_once(struct nl60211msg *nlreq)
 
 	//response
 	//simpleres.return_code = 0;
-	//nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
+	//nl60211_util_simple_response(nlreq, sizeof(simpleres), &simpleres);
 }
 
 static void nl60211_cmd_recv_cancel(struct nl60211msg *nlreq)
@@ -667,7 +442,7 @@ static void nl60211_cmd_recv_cancel(struct nl60211msg *nlreq)
 
 	//response
 	simpleres.return_code = 0;
-	nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
+	nl60211_util_simple_response(nlreq, sizeof(simpleres), &simpleres);
 }
 
 static void nl60211_cmd_sendplc(struct nl60211msg *nlreq)
@@ -677,7 +452,7 @@ static void nl60211_cmd_sendplc(struct nl60211msg *nlreq)
 					   nlreq->buf;
 	unsigned char *req_rawdata = req->da;
 
-	if (pr_debug_en) {
+	if (g_nl60211_ctrl_para.debugPrint) {
 		for (i = 0; i < req->total_len; i++) {
 			pr_warn("req_payload_raw[%d] = %3d (0x%02X)\n", i,
 				(unsigned int)req_rawdata[i],
@@ -685,15 +460,15 @@ static void nl60211_cmd_sendplc(struct nl60211msg *nlreq)
 		}
 	}
 
-	test_hmc_gen_pkt_snap(req->total_len, req_rawdata,
-			      nlreq->nl_msghdr.nlmsg_type & 0x00FF);
+	nl60211_util_gen_pkt(req->total_len, req_rawdata,
+			      nlreq->nl_msghdr.nlmsg_type);
 
 	//response
 	{
 		struct nl60211_sendplc_res simpleres;
 
 		simpleres.return_code = 0;
-		nl60211_cmd_simple_response(nlreq, sizeof(simpleres),
+		nl60211_util_simple_response(nlreq, sizeof(simpleres),
 					    &simpleres);
 	}
 }
@@ -705,7 +480,7 @@ static void nl60211_cmd_sendwifi(struct nl60211msg *nlreq)
 					    nlreq->buf;
 	unsigned char *req_rawdata = req->da;
 
-	if (pr_debug_en) {
+	if (g_nl60211_ctrl_para.debugPrint) {
 		for (i = 0; i < req->total_len; i++) {
 			pr_warn("req_payload_raw[%d] = %3d (0x%02X)\n", i,
 				(unsigned int)req_rawdata[i],
@@ -713,15 +488,15 @@ static void nl60211_cmd_sendwifi(struct nl60211msg *nlreq)
 		}
 	}
 
-	test_hmc_gen_pkt_snap(req->total_len, req_rawdata,
-			      nlreq->nl_msghdr.nlmsg_type & 0x00FF);
+	nl60211_util_gen_pkt(req->total_len, req_rawdata,
+			      nlreq->nl_msghdr.nlmsg_type);
 
 	//response
 	{
 		struct nl60211_sendwifi_res simpleres;
 
 		simpleres.return_code = 0;
-		nl60211_cmd_simple_response(nlreq, sizeof(simpleres),
+		nl60211_util_simple_response(nlreq, sizeof(simpleres),
 					    &simpleres);
 	}
 }
@@ -733,7 +508,7 @@ static void nl60211_cmd_sendflood(struct nl60211msg *nlreq)
 					     nlreq->buf;
 	unsigned char *req_rawdata = req->da;
 
-	if (pr_debug_en) {
+	if (g_nl60211_ctrl_para.debugPrint) {
 		for (i = 0; i < req->total_len; i++) {
 			pr_warn("req_payload_raw[%d] = %3d (0x%02X)\n", i,
 				(unsigned int)req_rawdata[i],
@@ -741,15 +516,15 @@ static void nl60211_cmd_sendflood(struct nl60211msg *nlreq)
 		}
 	}
 
-	test_hmc_gen_pkt_snap(req->total_len, req_rawdata,
-			      nlreq->nl_msghdr.nlmsg_type & 0x00FF);
+	nl60211_util_gen_pkt(req->total_len, req_rawdata,
+			      nlreq->nl_msghdr.nlmsg_type);
 
 	//response
 	{
 		struct nl60211_sendflood_res simpleres;
 
 		simpleres.return_code = 0;
-		nl60211_cmd_simple_response(nlreq, sizeof(simpleres),
+		nl60211_util_simple_response(nlreq, sizeof(simpleres),
 					    &simpleres);
 	}
 }
@@ -761,7 +536,7 @@ static void nl60211_cmd_sendbest(struct nl60211msg *nlreq)
 					    nlreq->buf;
 	unsigned char *req_rawdata = req->da;
 
-	if (pr_debug_en) {
+	if (g_nl60211_ctrl_para.debugPrint) {
 		for (i = 0; i < req->total_len; i++) {
 			pr_warn("req_payload_raw[%d] = %3d (0x%02X)\n", i,
 				(unsigned int)req_rawdata[i],
@@ -769,15 +544,42 @@ static void nl60211_cmd_sendbest(struct nl60211msg *nlreq)
 		}
 	}
 
-	test_hmc_gen_pkt_snap(req->total_len, req_rawdata,
-			      nlreq->nl_msghdr.nlmsg_type & 0x00FF);
+	nl60211_util_gen_pkt(req->total_len, req_rawdata,
+			      nlreq->nl_msghdr.nlmsg_type);
 
 	//response
 	{
 		struct nl60211_sendbest_res simpleres;
 
 		simpleres.return_code = 0;
-		nl60211_cmd_simple_response(nlreq, sizeof(simpleres),
+		nl60211_util_simple_response(nlreq, sizeof(simpleres),
+					    &simpleres);
+	}
+}
+
+static void nl60211_cmd_send(struct nl60211msg *nlreq)
+{
+	unsigned int i;
+	struct nl60211_send_req *req = (struct nl60211_send_req *)
+					   nlreq->buf;
+	unsigned char *req_rawdata = req->da;
+
+	if (g_nl60211_ctrl_para.debugPrint) {
+		for (i = 0; i < req->total_len; i++) {
+			pr_warn("req_payload_raw[%d] = %3d (0x%02X)\n", i,
+				(unsigned int)req_rawdata[i],
+				(unsigned int)req_rawdata[i]);
+		}
+	}
+
+	nl60211_util_gen_pkt_cp(req->total_len, req_rawdata);
+
+	//response
+	{
+		struct nl60211_send_res simpleres;
+
+		simpleres.return_code = 0;
+		nl60211_util_simple_response(nlreq, sizeof(simpleres),
 					    &simpleres);
 	}
 }
@@ -813,8 +615,7 @@ static void nl60211_cmd_getsa(struct nl60211msg *nlreq)
 	NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
 
 	//copy input command to response
-	nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
-	nlres->if_index = nlreq->if_index;
+	nl60211_nlmsghdr_copy(nlres, nlreq);
 
 	res = (struct nl60211_getsa_res *)nlres->buf;
 	res->return_code = return_code;
@@ -842,11 +643,13 @@ static void nl60211_cmd_addmpath(struct nl60211msg *nlreq)
 	if (!pdata->hmc_ops)
 		return;
 
+	//hmc_ops_fdb_insert
 	ret = pdata->hmc_ops->fdb_insert(req->da, req->iface_id);
 
 	//response
 	if (ret < 0) {
 		return_code = 1;
+		pr_err("fdb_insert error, ret = %d\n", ret);
 		pr_err("req->iface_id = %d\n", req->iface_id);
 		pr_err("req->da[0] = 0x%02X\n", req->da[0]);
 		pr_err("req->da[1] = 0x%02X\n", req->da[1]);
@@ -857,7 +660,7 @@ static void nl60211_cmd_addmpath(struct nl60211msg *nlreq)
 	}
 
 	simpleres.return_code = return_code;
-	nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
+	nl60211_util_simple_response(nlreq, sizeof(simpleres), &simpleres);
 }
 
 static void nl60211_cmd_delmpath(struct nl60211msg *nlreq)
@@ -881,7 +684,7 @@ static void nl60211_cmd_delmpath(struct nl60211msg *nlreq)
 	ret = pdata->hmc_ops->fdb_del(req->da, req->iface_id);
 
 	simpleres.return_code = (s32)ret;
-	nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
+	nl60211_util_simple_response(nlreq, sizeof(simpleres), &simpleres);
 }
 
 static void nl60211_cmd_setmpath(struct nl60211msg *nlreq)
@@ -925,8 +728,7 @@ static void nl60211_cmd_getmpath(struct nl60211msg *nlreq)
 	NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
 
 	//copy input command to response
-	nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
-	nlres->if_index = nlreq->if_index;
+	nl60211_nlmsghdr_copy(nlres, nlreq);
 
 	res = (struct nl60211_getmpath_res *)nlres->buf;
 	if (ret == 0) {
@@ -973,7 +775,7 @@ static void nl60211_cmd_dumpmpath(struct nl60211msg *nlreq)
 	//response
 	if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
 		return;
-	nl60211_cmd_plc_exp_time_reset(pdata);
+	nl60211_util_plc_exp_time_reset(pdata);
 	nlmsgsize = sizeof(struct nl60211msg) - sizeof(nlres->buf) +
 		    sizeof(struct nl60211_dumpmpath_res);
 	while (1) {
@@ -997,8 +799,7 @@ static void nl60211_cmd_dumpmpath(struct nl60211msg *nlreq)
 		NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
 
 		//copy input command to response
-		nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
-		nlres->if_index = nlreq->if_index;
+		nl60211_nlmsghdr_copy(nlres, nlreq);
 
 		res = (struct nl60211_dumpmpath_res *)nlres->buf;
 		if (do_final_msg) {
@@ -1047,7 +848,7 @@ static void nl60211_cmd_plcgetmetric(struct nl60211msg *nlreq)
 	//response
 	if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
 		return;
-	nl60211_cmd_plc_exp_time_reset(pdata);
+	nl60211_util_plc_exp_time_reset(pdata);
 	nlmsgsize = sizeof(struct nl60211msg) - sizeof(nlres->buf) +
 		    sizeof(struct nl60211_plcgetmetric_res);
 	skbres = nlmsg_new(nlmsgsize, GFP_ATOMIC);
@@ -1061,8 +862,7 @@ static void nl60211_cmd_plcgetmetric(struct nl60211msg *nlreq)
 	NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
 
 	//copy input command to response
-	nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
-	nlres->if_index = nlreq->if_index;
+	nl60211_nlmsghdr_copy(nlres, nlreq);
 
 	res = (struct nl60211_plcgetmetric_res *)nlres->buf;
 	if (mpath) {
@@ -1090,7 +890,7 @@ static void nl60211_cmd_plcsetmetric(struct nl60211msg *nlreq)
 	struct nl60211_plcsetmetric_res simpleres;
 	s32 return_code = 0;
 
-	nl60211_cmd_plc_exp_time_reset(pdata);
+	nl60211_util_plc_exp_time_reset(pdata);
 	mpath = ak60211_mpath_lookup(pdata, req->da);
 
 	//request
@@ -1105,7 +905,7 @@ static void nl60211_cmd_plcsetmetric(struct nl60211msg *nlreq)
 
 	//response
 	simpleres.return_code = return_code;
-	nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
+	nl60211_util_simple_response(nlreq, sizeof(simpleres), &simpleres);
 }
 
 static void nl60211_cmd_plcgetmpara(struct nl60211msg *nlreq)
@@ -1138,8 +938,7 @@ static void nl60211_cmd_plcgetmpara(struct nl60211msg *nlreq)
 	NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
 
 	//copy input command to response
-	nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
-	nlres->if_index = nlreq->if_index;
+	nl60211_nlmsghdr_copy(nlres, nlreq);
 
 	res = (struct nl60211_plcgetmpara_res *)nlres->buf;
 	res->return_code = return_code;
@@ -1253,7 +1052,7 @@ static void nl60211_cmd_plcsetmpara(struct nl60211msg *nlreq)
 	if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
 		return;
 	simpleres.return_code = return_code;
-	nl60211_cmd_simple_response(nlreq, sizeof(simpleres), &simpleres);
+	nl60211_util_simple_response(nlreq, sizeof(simpleres), &simpleres);
 }
 
 static void nl60211_cmd_plcdumpsta(struct nl60211msg *nlreq)
@@ -1285,8 +1084,7 @@ static void nl60211_cmd_plcdumpsta(struct nl60211msg *nlreq)
 						       nlmsgsize, 0);
 		NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
 		//copy input command to response
-		nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
-		nlres->if_index = nlreq->if_index;
+		nl60211_nlmsghdr_copy(nlres, nlreq);
 		res = (struct nl60211_plcdumpsta_res *)nlres->buf;
 		res->return_code = 0;
 		res->plink_state = (u32)sta->plink_state;
@@ -1311,8 +1109,7 @@ static void nl60211_cmd_plcdumpsta(struct nl60211msg *nlreq)
 					       nlmsgsize, 0);
 	NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
 	//copy input command to response
-	nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
-	nlres->if_index = nlreq->if_index;
+	nl60211_nlmsghdr_copy(nlres, nlreq);
 	res = (struct nl60211_plcdumpsta_res *)nlres->buf;
 	res->return_code = -1;
 	//nlmsg_end(skb_res, (struct nlmsghdr *)snap_res);
@@ -1340,7 +1137,7 @@ static void nl60211_cmd_plcdumpmpath(struct nl60211msg *nlreq)
 	//response
 	if (nlreq->nl_msghdr.nlmsg_type & NL60211FLAG_NO_RESPONSE)
 		return;
-	nl60211_cmd_plc_exp_time_reset(ifmsh);
+	nl60211_util_plc_exp_time_reset(ifmsh);
 	nlmsgsize = sizeof(struct nl60211msg) - sizeof(nlres->buf) +
 		    sizeof(struct nl60211_plcdumpmpath_res);
 	spin_lock_bh(&tbl->walk_lock);
@@ -1354,8 +1151,7 @@ static void nl60211_cmd_plcdumpmpath(struct nl60211msg *nlreq)
 						       nlmsgsize, 0);
 		NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
 		//copy input command to response
-		nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
-		nlres->if_index = nlreq->if_index;
+		nl60211_nlmsghdr_copy(nlres, nlreq);
 		res = (struct nl60211_plcdumpmpath_res *)nlres->buf;
 		res->return_code = 0;
 		memcpy(res->da, mpath->dst, ETH_ALEN);
@@ -1385,8 +1181,7 @@ static void nl60211_cmd_plcdumpmpath(struct nl60211msg *nlreq)
 					       nlmsgsize, 0);
 	NETLINK_CB(skbres).dst_group = 0; /* not in mcast group */
 	//copy input command to response
-	nlres->nl_msghdr.nlmsg_type = nlreq->nl_msghdr.nlmsg_type;
-	nlres->if_index = nlreq->if_index;
+	nl60211_nlmsghdr_copy(nlres, nlreq);
 	res = (struct nl60211_plcdumpmpath_res *)nlres->buf;
 	res->return_code = -1;
 	ret = nlmsg_unicast(nl_sk, skbres, PID_OF_SENDER);
@@ -1396,7 +1191,11 @@ static void nl60211_cmd_plcdumpmpath(struct nl60211msg *nlreq)
 	}
 }
 
-static int nl60211_rx_callback_proto_filter(size_t len, u8 *data)
+static int
+nl60211_rx_callback_proto_filter(
+	size_t len,
+	u8 *data,
+	unsigned int cmd_type)
 {
 	struct sk_buff *skb_res;
 	struct nl60211msg *snap_res;
@@ -1421,7 +1220,7 @@ static int nl60211_rx_callback_proto_filter(size_t len, u8 *data)
 	NETLINK_CB(skb_res).dst_group = 0; /* not in mcast group */
 
 	//copy input command to response
-	snap_res->nl_msghdr.nlmsg_type = command_type_recv;
+	snap_res->nl_msghdr.nlmsg_type = cmd_type;
 	snap_res->if_index = if_index_recv;
 
 	res_payload = (struct nl60211_recv_res *)snap_res->buf;
@@ -1454,28 +1253,38 @@ int nl60211_rx_callback(struct sk_buff *skb)
 		return 0;
 
 	do {
-		if (len < 46)
-			break;
-		if (len > 1500)
-			break;
-		if (data[12] != recv_ether_type[0])
-			break;
-		if (data[13] != recv_ether_type[1])
-			break;
+		unsigned int cmd_type;
+		//pr_err("nl60211 rx, dev name = %s\n", skb->dev->name);
+		//if (len < 46)
+		//	break;
+		//if (len > 1500)
+		//	break;
+		//if (data[12] != recv_ether_type[0])
+		//	break;
+		//if (data[13] != recv_ether_type[1])
+		//	break;
 		//match
 		is_nl60211_in_recv_once = 0;
 		pr_info("[SNAP RX] ether_type = %02X %02X, len = %ld\n",
 			data[12],
 			data[13],
 			len);
-		if (pr_debug_en) {
+		if (g_nl60211_ctrl_para.debugPrint) {
 			for (i = 14; i < len; i++) {
 				pr_info("[SNAP RX] 0x%02X\n", data[i]);
 				if (i >= 17)
 					break;
 			}
 		}
-		nl60211_rx_callback_proto_filter(len + skb->mac_len, data);
+		cmd_type = command_type_recv;
+		if (g_nl60211_ctrl_para.recvPortDetect) {
+			if (strcmp(skb->dev->name, "mesh0") == 0)
+				cmd_type = NL60211_RECV_WIFI;
+			else
+				cmd_type = NL60211_RECV_PLC;
+		}
+		nl60211_rx_callback_proto_filter(len + skb->mac_len,
+						 data, cmd_type);
 		return 0;
 	} while (0);
 
@@ -1492,7 +1301,7 @@ static void nl60211_netlink_input(struct sk_buff *skb_in)
 	nlh = (struct nlmsghdr *)skb_in->data;
 	nlreq = (struct nl60211msg *)skb_in->data;
 
-	if (pr_debug_en) {
+	if (g_nl60211_ctrl_para.debugPrint) {
 		pr_info("\nEntering: %s\n", __func__);
 		pr_info("skb_in: len=%d, data_len=%d, mac_len=%d\n",
 			skb_in->len, skb_in->data_len, skb_in->mac_len);
@@ -1511,9 +1320,9 @@ static void nl60211_netlink_input(struct sk_buff *skb_in)
 		pr_info("if_index     = %d\n", nlreq->if_index);
 	}
 
-	switch (nlh->nlmsg_type & 0x00FF) {
-	case NL60211_DEBUG:
-		nl60211_cmd_debug(nlreq);
+	switch (nlh->nlmsg_type & NL60211_CMD_MASK) {
+	case NL60211_CTRL:
+		nl60211_cmd_ctrl_proc(nlreq);
 		break;
 	case NL60211_GETMESHID:
 		nl60211_cmd_getmeshid(nlreq);
@@ -1545,6 +1354,9 @@ static void nl60211_netlink_input(struct sk_buff *skb_in)
 		break;
 	case NL60211_SEND_BEST:
 		nl60211_cmd_sendbest(nlreq);
+		break;
+	case NL60211_SEND:
+		nl60211_cmd_send(nlreq);
 		break;
 	case NL60211_GETSA:
 		nl60211_cmd_getsa(nlreq);

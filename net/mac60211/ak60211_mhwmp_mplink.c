@@ -20,6 +20,23 @@ static inline u32 ak60211_mplink_free_count(struct ak60211_if_data *ifmsh)
 	return ifmsh->mshcfg.MeshMaxPeerLinks - atomic_read(&ifmsh->estab_plinks);
 }
 
+void ak60211_mesh_plink_fsm_restart(struct ak60211_sta_info *sta)
+{
+	struct ak60211_if_data *ifmsh = sta->local;
+	struct ak60211_mesh_table *tbl = ifmsh->mesh_paths;
+	struct ak60211_mesh_path *mpath;
+
+	sta->plink_state = AK60211_PLINK_LISTEN;
+	sta->reason = 0;
+	sta->plid = 0;
+	sta->llid = 0;
+
+	mpath = ak60211_mpath_lookup(ifmsh, sta->addr);
+	if (mpath)
+		__ak60211_mpath_del(tbl, mpath);
+	/* sta->llid = sta->plid = sta->reason = 0; */
+}
+
 int __ak60211_mpath_queue_preq(struct ak60211_if_data *ifmsh,
 				   const u8 *dst,
 				   u8 flags)
@@ -118,6 +135,7 @@ static u32 ak60211_hwmp_route_info_get(struct ak60211_if_data *ifmsh,
 
 	switch (action) {
 	case AK60211_MPATH_PREQ:
+		plc_info("MPATH_PREQ\n");
 		orig_addr = buff->un.preq.elem.h_origaddr;
 		orig_sn = buff->un.preq.elem.orig_sn;
 		orig_lifetime = buff->un.preq.elem.lifetime;
@@ -125,6 +143,7 @@ static u32 ak60211_hwmp_route_info_get(struct ak60211_if_data *ifmsh,
 		hopcount = buff->un.preq.elem.hop_count + 1;
 		break;
 	case AK60211_MPATH_PREP:
+		plc_info("MPATH_PREP\n");
 		orig_addr = buff->un.prep.elem.h_targetaddr;
 		orig_sn = buff->un.prep.elem.target_sn;
 		orig_lifetime = buff->un.prep.elem.lifetime;
@@ -186,7 +205,8 @@ static u32 ak60211_hwmp_route_info_get(struct ak60211_if_data *ifmsh,
 
 			/* Update path to HMC */
 			if (ifmsh->hmc_ops)
-				ifmsh->hmc_ops->path_update(mpath->dst, mpath->metric, mpath->sn, mpath->flags, HMC_PORT_PLC);
+				ifmsh->hmc_ops->path_update(mpath->dst,
+						mpath->metric, mpath->sn, mpath->flags, HMC_PORT_PLC);
 		} else {
 			spin_unlock_bh(&mpath->state_lock);
 		}
