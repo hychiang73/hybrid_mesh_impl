@@ -15,7 +15,8 @@ int if_nl_send_w_2_buf(uint16_t type, unsigned int if_index, u8* buf1, u32 buf1_
 
 unsigned int g_if_idx_from_shell_input;
 u8 g_sa[6];
-u8 g_peer_mac[6];
+u8 g_peer_mac_plc[6];
+u8 g_peer_mac_wifi[6];
 u8 g_peer_ip[4];
 
 template <typename REQ, typename RES>
@@ -690,7 +691,7 @@ public:
 	}
 	void CopyDaSaFromGlobal()
 	{
-		CopyDaSaType(g_peer_mac, g_sa);
+		CopyDaSaType(g_peer_mac_plc, g_sa);
 	}
 };
 
@@ -843,9 +844,9 @@ static void Self_Test_Util_PingPeer()
 		tpr(" : establish mpath of peer node ... (%d)\n", i);
 		usleep(500000);
 		dumpMpath.FillMpathTable();
-		if (dumpMpath.FindMpath(g_peer_mac, 1) == 0)
+		if (dumpMpath.FindMpath(g_peer_mac_plc, 1) == 0)
 			continue;
-		if (dumpMpath.FindMpath(g_peer_mac, 2) == 0)
+		if (dumpMpath.FindMpath(g_peer_mac_wifi, 2) == 0)
 			continue;
 		return;
 	}
@@ -1238,7 +1239,8 @@ static void Self_Test_Util_Read_SA()
 static void Self_Test_Util_Read_Peer_Info()
 {
 #define PEER_INFO_FILE "peer_info.txt"
-#define PEER_MAC_STR "peer_mac(hex):"
+#define PEER_MAC_PLC_STR "peer_mac_plc(hex):"
+#define PEER_MAC_WIFI_STR "peer_mac_wifi(hex):"
 #define PEER_IP_STR "peer_ip:"
 
 	u32 i;
@@ -1256,22 +1258,41 @@ static void Self_Test_Util_Read_Peer_Info()
 	}
 
 	if (fscanf(fp, "%s", scanStr) == 0) {
-		printf(" Error, peer_mac name scan error!\n");
+		printf(" Error, peer_mac_plc name scan error!\n");
 		exit(-1);
 	}
-
-	if (strcmp(scanStr, PEER_MAC_STR) != 0) {
-		printf(" Error, peer_mac name string not match!\n");
+	if (strcmp(scanStr, PEER_MAC_PLC_STR) != 0) {
+		printf(" Error, peer_mac_plc name string not match!\n");
 		exit(-1);
 	}
-	printf("%s =\n", PEER_MAC_STR);
+	printf("%s =\n", PEER_MAC_PLC_STR);
 	for (i = 0; i < 6; i++) {
 		if (fscanf(fp, "%x", &tempU32) == 0) {
-			printf(" Error, peer_mac scan error in %d bytes!\n", i);
+			printf(" Error, peer_mac_plc scan error in %d bytes!\n", i);
 			exit(-1);
 		}
-		g_peer_mac[i] = (u8)tempU32;
-		printf("%X ", g_peer_mac[i]);
+		g_peer_mac_plc[i] = (u8)tempU32;
+		printf("%X ", g_peer_mac_plc[i]);
+		if (i==5)
+			printf("\n");
+	}
+
+	if (fscanf(fp, "%s", scanStr) == 0) {
+		printf(" Error, peer_mac_wifi name scan error!\n");
+		exit(-1);
+	}
+	if (strcmp(scanStr, PEER_MAC_WIFI_STR) != 0) {
+		printf(" Error, peer_mac_wifi name string not match!\n");
+		exit(-1);
+	}
+	printf("%s =\n", PEER_MAC_WIFI_STR);
+	for (i = 0; i < 6; i++) {
+		if (fscanf(fp, "%x", &tempU32) == 0) {
+			printf(" Error, peer_mac_wifi scan error in %d bytes!\n", i);
+			exit(-1);
+		}
+		g_peer_mac_wifi[i] = (u8)tempU32;
+		printf("%X ", g_peer_mac_wifi[i]);
 		if (i==5)
 			printf("\n");
 	}
@@ -1348,7 +1369,7 @@ static void Self_Test_003()
 			usleep(500000);
 			plcDumpSta.FillStaTable();
 			if (plcDumpSta.staNum != 0) {
-				if (plcDumpSta.FindSta(g_peer_mac))
+				if (plcDumpSta.FindSta(g_peer_mac_plc))
 					break;
 			}
 		}
@@ -1362,8 +1383,8 @@ static void Self_Test_003()
 	Self_Test_Util_Echo_Req_SendWifi();
 	Self_Test_Util_Echo_Req_SendBest();
 	//Self_Test_Util_Echo_Req_SendFlood();
-	plcSetMetric.RunTest(g_peer_mac, 20000);
-	plcGetMetric.RunTest(g_peer_mac);
+	plcSetMetric.RunTest(g_peer_mac_plc, 20000);
+	plcGetMetric.RunTest(g_peer_mac_plc);
 	Self_Test_Util_Echo_Req_SendBest();
 }
 

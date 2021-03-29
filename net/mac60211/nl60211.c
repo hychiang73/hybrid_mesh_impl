@@ -132,6 +132,89 @@ void nl60211_util_gen_pkt(
 #endif
 }
 
+void nl60211_util_gen_pkt_cp(
+	unsigned int total_len,
+	unsigned char *raw)
+{
+#if IN_JETSON
+	unsigned int i = 0;
+	unsigned int proto = 0xAA66;
+	struct sk_buff *new_sk;
+	struct ethhdr *ether;
+	struct ak60211_if_data *pdata = ak60211_dev_to_ifdata();
+	//const u8 da[ETH_ALEN] = {0x00,0x04,0x4b,0xe6,0xec,0x3d};
+	//const u8 da[ETH_ALEN] = {0x00,0x19,0x94,0x38,0xfd,0x8e};
+	//const u8 sa[ETH_ALEN] = {0x00,0x04,0x4b,0xec,0x28,0x3b};
+	u8 da[ETH_ALEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+	u8 sa[ETH_ALEN] = {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff};
+	u8 *pos;
+
+	if (!pdata->hmc_ops) {
+		pr_err("nl60211_util_gen_pkt() error, can't find hmc_ops!\n");
+		return;
+	}
+
+	for (i = 0; i < total_len; i++) {
+		if (i < 6) {
+			da[i] = raw[i];
+		} else if (i < 12) {
+			sa[i - 6] = raw[i];
+		} else if (i == 12) {
+			proto = proto & 0x00FF;
+			proto = proto | (((unsigned int)raw[i]) << 8);
+		} else if (i == 13) {
+			proto = proto & 0xFF00;
+			proto = proto | (((unsigned int)raw[i]) << 0);
+			i = 14;
+			break;
+		}
+	}
+
+	//TRACE();
+
+	if (total_len > 19)
+		new_sk = dev_alloc_skb(2 + total_len + 2);
+	else
+		new_sk = dev_alloc_skb(128);
+
+	if (!new_sk) {
+		//hmc_err("no space to allocate");
+		pr_err("nl60211_util_gen_pkt() error, new_skb alloc failed\n");
+		return;
+	}
+
+	skb_reserve(new_sk, 2);
+
+	ether = (struct ethhdr *)skb_put(new_sk, ETH_HLEN);
+	//memset(ether, 0, ETH_HLEN);
+
+	memcpy(ether->h_dest, da, ETH_ALEN);
+	memcpy(ether->h_source, sa, ETH_ALEN);
+	ether->h_proto = ntohs(proto);
+
+	if (total_len <= 14) {
+		pos = skb_put(new_sk, 5);
+		*pos++ = 100;
+		*pos++ = 101;
+		*pos++ = 102;
+		*pos++ = 103;
+		*pos++ = 104;
+	} else {
+		pos = skb_put(new_sk, total_len - 14);
+		for (i = i; i < total_len; i++)
+			*pos++ = raw[i];
+	}
+
+	skb_reset_mac_header(new_sk);
+
+	//hmc_print_skb(new_sk, "nl60211_util_gen_pkt");
+
+
+	pdata->hmc_ops->xmit_cp(new_sk);
+#endif
+}
+
+
 static void nl60211_util_plc_exp_time_reset(struct ak60211_if_data *ifmsh)
 {
 	struct ak60211_mesh_path *mpath;
@@ -183,7 +266,8 @@ static void nl60211_util_debug_dump(struct nl60211msg *nlreq)
 {
 	pr_warn("====== NL60211 DUMP ======\n");
 	pr_warn("magic number = %d\n", NL60211_VERSION);
-	pr_warn("g_nl60211_ctrl_para.debugPrint = %d\n", g_nl60211_ctrl_para.debugPrint);
+	pr_warn("g_nl60211_ctrl_para.debugPrint = %d\n",
+		g_nl60211_ctrl_para.debugPrint);
 	pr_warn("pid_of_sender = %d\n", PID_OF_SENDER);
 	pr_warn("pid_of_receiver = %d\n", pid_of_receiver);
 	pr_warn("if_index = %u\n", IF_INDEX);
@@ -466,6 +550,33 @@ static void nl60211_cmd_sendbest(struct nl60211msg *nlreq)
 	//response
 	{
 		struct nl60211_sendbest_res simpleres;
+
+		simpleres.return_code = 0;
+		nl60211_util_simple_response(nlreq, sizeof(simpleres),
+					    &simpleres);
+	}
+}
+
+static void nl60211_cmd_send(struct nl60211msg *nlreq)
+{
+	unsigned int i;
+	struct nl60211_send_req *req = (struct nl60211_send_req *)
+					   nlreq->buf;
+	unsigned char *req_rawdata = req->da;
+
+	if (g_nl60211_ctrl_para.debugPrint) {
+		for (i = 0; i < req->total_len; i++) {
+			pr_warn("req_payload_raw[%d] = %3d (0x%02X)\n", i,
+				(unsigned int)req_rawdata[i],
+				(unsigned int)req_rawdata[i]);
+		}
+	}
+
+	nl60211_util_gen_pkt_cp(req->total_len, req_rawdata);
+
+	//response
+	{
+		struct nl60211_send_res simpleres;
 
 		simpleres.return_code = 0;
 		nl60211_util_simple_response(nlreq, sizeof(simpleres),
@@ -1080,7 +1191,11 @@ static void nl60211_cmd_plcdumpmpath(struct nl60211msg *nlreq)
 	}
 }
 
-static int nl60211_rx_callback_proto_filter(size_t len, u8 *data, unsigned int cmd_type)
+static int
+nl60211_rx_callback_proto_filter(
+	size_t len,
+	u8 *data,
+	unsigned int cmd_type)
 {
 	struct sk_buff *skb_res;
 	struct nl60211msg *snap_res;
@@ -1168,7 +1283,8 @@ int nl60211_rx_callback(struct sk_buff *skb)
 			else
 				cmd_type = NL60211_RECV_PLC;
 		}
-		nl60211_rx_callback_proto_filter(len + skb->mac_len, data, cmd_type);
+		nl60211_rx_callback_proto_filter(len + skb->mac_len,
+						 data, cmd_type);
 		return 0;
 	} while (0);
 
@@ -1238,6 +1354,9 @@ static void nl60211_netlink_input(struct sk_buff *skb_in)
 		break;
 	case NL60211_SEND_BEST:
 		nl60211_cmd_sendbest(nlreq);
+		break;
+	case NL60211_SEND:
+		nl60211_cmd_send(nlreq);
 		break;
 	case NL60211_GETSA:
 		nl60211_cmd_getsa(nlreq);

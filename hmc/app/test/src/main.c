@@ -11,6 +11,7 @@
 #define STR_WIFISEND        "sendwifi"
 #define STR_FLOODSEND       "sendflood"
 #define STR_BESTSEND        "sendbest"
+#define STR_SEND            "send"
 #define STR_GETSA           "getsa"
 #define STR_ADDMPATH        "addmpath"
 #define STR_DELMPATH        "delmpath"
@@ -428,6 +429,7 @@ int do_sendplc(int argc, char **argv)
 
 	return 0;
 }
+
 int do_sendwifi(int argc, char **argv)
 {
 	unsigned int if_idx = nametoindex(argv[0]);
@@ -543,6 +545,46 @@ int do_sendbest(int argc, char **argv)
 	if_nl_recv();
 	nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
 	res = (struct nl60211_sendbest_res *)nlres->buf;
+	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
+	printf("if_index    = %d\n", nlres->if_index);
+	printf("return_code = %d\n", res->return_code);
+
+	return 0;
+}
+
+int do_send(int argc, char **argv)
+{
+	unsigned int if_idx = nametoindex(argv[0]);
+	//request
+	struct nl60211_send_req *req;
+	uint8_t *req_raw;
+	//response
+	struct nl60211msg *nlres;
+	struct nl60211_send_res *res;
+	int i, temp;
+
+	printf("argc = %d, if_idx = %d\n", argc, if_idx);
+	argc--;
+	argv++;
+
+	req = (struct nl60211_send_req *)sk_msg_send.nl_msg.buf;
+	req->total_len = argc;
+	req_raw = req->da; //first
+	for (i = 0; i < argc; i++) {
+		if (sscanf(argv[i], "%x", &temp) == 0) {
+			printf("Error: not a hex string!\n");
+			exit(-1);
+		}
+		req_raw[i] = (uint8_t)temp;
+	}
+
+	if_nl_send(NL60211_SEND,
+		if_idx,
+		sizeof(req->total_len) +/*da,sa,ether_type,payload*/argc);
+
+	if_nl_recv();
+	nlres = (struct nl60211msg *)&sk_msg_recv.nl_msg;
+	res = (struct nl60211_send_res *)nlres->buf;
 	printf("nlmsg_type  = %d\n", nlres->nl_msghdr.nlmsg_type);
 	printf("if_index    = %d\n", nlres->if_index);
 	printf("return_code = %d\n", res->return_code);
@@ -1063,6 +1105,7 @@ static const struct cmd {
 	{ STR_WIFISEND,     do_sendwifi },
 	{ STR_FLOODSEND,    do_sendflood },
 	{ STR_BESTSEND,     do_sendbest },
+	{ STR_SEND,         do_send },
 	{ STR_GETSA,        do_getsa },
 	{ STR_ADDMPATH,     do_addmpath },
 	{ STR_DELMPATH,     do_delmpath },

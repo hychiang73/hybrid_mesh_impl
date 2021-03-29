@@ -63,6 +63,7 @@ enum {
 	NL60211_SEND_WIFI,     // a.out sendwifi    br0 [da] [sa] [eth type] ...
 	NL60211_SEND_FLOOD,    // a.out sendflood   br0 [da] [sa] [eth type] ...
 	NL60211_SEND_BEST,     // a.out sendbest    br0 [da] [sa] [eth type] ...
+	NL60211_SEND,          // a.out send        br0 [da] [sa] [eth type] ...
 
 	NL60211_HMC_MASK = 0x0300,
 	NL60211_ADD_MPATH,     // a.out addmpath    br0 [da] [if]
@@ -149,6 +150,10 @@ struct nl60211_sendflood_res {
 };
 
 struct nl60211_sendbest_res {
+	s32    return_code;
+};
+
+struct nl60211_send_res {
 	s32    return_code;
 };
 
@@ -277,6 +282,14 @@ struct nl60211_sendflood_req {
 };
 
 struct nl60211_sendbest_req {
+	u32    total_len;
+	u8     da[6];
+	u8     sa[6];
+	u8     ether_type[2];
+	u8     payload[];
+};
+
+struct nl60211_send_req {
 	u32    total_len;
 	u8     da[6];
 	u8     sa[6];
