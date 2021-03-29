@@ -90,25 +90,33 @@ static void fdb_discard_frame(struct sk_buff *skb)
 static void fdb_flush_tx_pending(struct hmc_fdb_entry *fdb)
 {
 	struct sk_buff *skb;
-	unsigned long flags;
-	u8 wmac[ETH_ALEN] = {0};
-
-	spin_lock_irqsave(&hmc->queue_lock, flags);
-
-	hmc_convert_da_to_wmac(fdb->addr, wmac);
+	struct mesh_path *mppath = NULL;
+	u8 da[ETH_ALEN] = {0};
+	int egress = fdb->iface_id;
 
 	while ((skb = skb_dequeue(&hmc->frame_queue)) != NULL) {
-		hmc_info("### dequeue skb (%p), addr : %pM, port : %d", skb, skb->data, fdb->iface_id);
-		if (ether_addr_equal(fdb->addr, skb->data) ||
-			ether_addr_equal(wmac, skb->data)) {
-			if (fdb->iface_id == HMC_PORT_PLC && EN_PLC_ENCAP)
-				ak60211_nexthop_resolved(skb, fdb->iface_id);
-			else
-				hmc_xmit(skb, fdb->iface_id);
-		} 
-	}
+		if (egress == HMC_PORT_WIFI) {
+			mppath = hmc_wpath_mpp_lookup(skb->data);
+			if (mppath)
+				memcpy(da, mppath->dst, ETH_ALEN);
+		}
 
-	spin_unlock_irqrestore(&hmc->queue_lock, flags);
+		if (!is_valid_ether_addr(da))
+			memcpy(da, skb->data, ETH_ALEN);
+
+		hmc_info("### dequeue skb addr : %pM, DA : %pM", skb->data, da);
+
+		if (!ether_addr_equal(da, skb->data)) {
+			hmc_info("discard queued skb");
+			fdb_discard_frame(skb);
+			continue;
+		}
+
+		if (egress == HMC_PORT_PLC && EN_PLC_ENCAP)
+			ak60211_nexthop_resolved(skb, egress);
+		else
+			hmc_xmit(skb, egress);
+	}
 }
 
 #if 0
@@ -292,8 +300,8 @@ void hmc_path_update(u8 *dst, u32 metric, u32 sn, int flags, int id)
 	fdb->flags = flags;
 	fdb->exp_time = jiffies;
 
-//	if (fdb->flags & MESH_PATH_ACTIVE)
-//		fdb_flush_tx_pending(fdb);
+	if (fdb->flags & MESH_PATH_ACTIVE)
+		fdb_flush_tx_pending(fdb);
 }
 
 int hmc_convert_da_to_wmac(const u8 *da, u8 *wmac)
@@ -321,7 +329,7 @@ int hmc_convert_da_to_wmac(const u8 *da, u8 *wmac)
 	else
 		memcpy(wmac, da, ETH_ALEN);
 
-	hmc_info("convert (%pM) --> (%pM)\n", da, wmac);
+	hmc_dbg("convert (%pM) --> (%pM)\n", da, wmac);
 	return 0;
 }
 
@@ -456,7 +464,7 @@ static int hmc_wlan_path_resolve(struct sk_buff *skb, u8 *addr)
 	hmc_path_update(proxy, mpath->metric, mpath->sn, mpath->flags, HMC_PORT_WIFI);
 
 	if (!(mpath->flags & MESH_PATH_RESOLVING)) {
-		hmc_err("callback plc PREQ queue");
+		hmc_err("call wifi PREQ queue");
 		mesh_queue_preq(mpath, PREQ_Q_F_START | PREQ_Q_F_REFRESH);
 	}
 
@@ -481,7 +489,7 @@ static int hmc_plc_path_resolve(struct sk_buff *skb, u8 *addr)
 	hmc_path_update(addr, ppath->metric, ppath->sn, ppath->flags, HMC_PORT_PLC);
 
 	if (!(ppath->flags & MESH_PATH_RESOLVING)) {
-		hmc_err("callback plc PREQ queue");
+		hmc_err("call plc PREQ queue");
 		plc_hmc_preq_queue(addr);
 	}
 
@@ -554,18 +562,16 @@ int hmc_br_tx_handler(struct sk_buff *skb)
 
 	if (fdb->flags & MESH_PATH_ACTIVE) {
 		if (fdb->iface_id == HMC_PORT_PLC && EN_PLC_ENCAP) {
-			if (ak60211_nexthop_resolved(skb, fdb->iface_id) == NF_DROP) {
-				hmc_err("PLC xmit error! Fix ME !!");
+			if (ak60211_nexthop_resolved(skb, fdb->iface_id) == NF_DROP)
 				goto queue;
-			}
-		} else {
+		} else
 			hmc_xmit(skb, fdb->iface_id);
-		}
+
 		return NF_ACCEPT;
 	}
 
 queue:
-//	hmc_tx_skb_queue(skb);
+	hmc_tx_skb_queue(skb);
 	hmc_plc_path_resolve(skb, dest);
 	hmc_wlan_path_resolve(skb, dest);
 	return NF_ACCEPT;
@@ -582,12 +588,8 @@ int hmc_br_rx_handler(struct sk_buff *skb)
 
 	//hmc_print_skb(skb, "hmc_rx_handler");
 
-	//mutex_lock(&hmc->rx_mutex);
-
 	/* SNAP data might be inside 802.3 frames even if coming from wifi egress. */
 	ret = plc_hmc_rx(skb, nskb);
-
-	//mutex_unlock(&hmc->rx_mutex);
 
 	/* return to br_handle_frame */
 	if (ret == NF_DROP)
