@@ -1037,6 +1037,9 @@ void plc_send_beacon(void)
 	if (!ifmsh->hmc_ops)
 		return;
 
+	if (ifmsh->hmc_ops->check_port(HMC_PORT_PLC) != 0)
+		return;
+
 	// beacon packet size is 92 bytes
 	nskb = dev_alloc_skb(2 + beacon_len + 2);
 	if (!nskb)

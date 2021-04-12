@@ -261,6 +261,7 @@ struct ak60211_hmc_ops {
 	int (*fdb_lookup)(struct hmc_fdb_entry *f, const u8 *addr, u16 id);
 	int (*fdb_del)(const u8 *addr, u16 id);
 	int (*fdb_dump)(struct nl60211_mesh_info *info, int size);
+	int (*check_port)(int port);
 };
 
 struct ak60211_if_data {
