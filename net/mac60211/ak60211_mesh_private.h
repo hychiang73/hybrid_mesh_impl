@@ -472,6 +472,7 @@ struct ak60211s_hdr {
 	u8 flags;
 	u8 ttl;
 	__le32 seqnum;
+	u16 foffset;
 	__le16 ethtype;
 } __packed;
 
