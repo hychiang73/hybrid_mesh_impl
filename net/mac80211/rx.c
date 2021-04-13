@@ -2921,6 +2921,7 @@ ieee80211_rx_h_mesh_fwding(struct ieee80211_rx_data *rx)
 				   fwd_hdr->addr2);
 		IEEE80211_IFSTA_MESH_CTR_INC(ifmsh, dropped_frames_no_route);
 		kfree_skb(fwd_skb);
+		pr_info("[%s]: Unable to resolve next hop", __func__);
 		return RX_DROP_MONITOR;
 	}
 

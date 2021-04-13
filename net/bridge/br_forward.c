@@ -141,6 +141,11 @@ static int deliver_clone(const struct net_bridge_port *prev,
 void br_forward(const struct net_bridge_port *to,
 		struct sk_buff *skb, bool local_rcv, bool local_orig)
 {
+	if (to->br->hmc_ops) {
+		if (to->br->hmc_ops->fwd(skb) == NF_ACCEPT)
+			return;
+	}
+
 	if (to && should_deliver(to, skb)) {
 		if (local_rcv)
 			deliver_clone(to, skb, local_orig);
