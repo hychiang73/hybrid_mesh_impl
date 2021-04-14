@@ -347,7 +347,7 @@ int hmc_convert_da_to_wmac(const u8 *da, u8 *wmac)
 	if (mppath)
 		memcpy(wmac, mppath->mpp, ETH_ALEN);
 	else if (mpath)
-		memcpy(wmac, mppath->dst, ETH_ALEN);
+		memcpy(wmac, mpath->dst, ETH_ALEN);
 	else
 		memcpy(wmac, da, ETH_ALEN);
 
