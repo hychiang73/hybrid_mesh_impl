@@ -14,7 +14,7 @@
 #define MESH_CONF_T		100
 #define MESH_HOLD_T		100
 
-#define MESH_PATH_TIMEOUT	1000
+#define MESH_PATH_TIMEOUT	10000
 #define MESH_DEFAULT_PLINK_TIMEOUT	1800 /* timeout in seconds */
 
 /* Minimum interval between two consecutive PREQs originated
@@ -135,6 +135,13 @@ void ak60211_pkt_hex_dump(struct sk_buff *pskb, const char *type, int offset)
 		len = skb->len;
 
 #if 0  // for debug, just save it but not use in gerenal
+	plc_info("\nmac:%p\ndata:%p\nnetwork:%p\ntransport:%p\nprotocol:%x\nhdr_len:%d\nheadroom:%d\ncsum_start:%p\ncsum_offset:%d\nip_summed:%d\ncsum_valid:%d\n",
+			skb_mac_header(skb),
+			skb->data, skb_network_header(skb), skb_transport_header(skb),
+			skb->protocol, skb->hdr_len,
+			skb_headroom(skb), skb_checksum_start(skb), skb->csum_offset,
+			skb->ip_summed, skb->csum_valid);
+
 	if (skb->dev) {
 		struct net_device *indev, *brdev;
 		struct in_device *in_dev = __in_dev_get_rcu(skb->dev);
@@ -212,7 +219,6 @@ BR_DEV_NULL:
 	}
 #endif
 	if (skb->data != data) {
-		plc_info("skb->data != skb->mac_header\n");
 		len += 14;
 	}
 	remaining = len + 2 + offset;
@@ -559,9 +565,7 @@ void ak60211_plcto8023_unencap(struct ak60211_if_data *ifmsh,
 
 	rmb();
 	pos = skb_mac_header(skb);
-
 	plchdrsize = sizeof(struct plc_hdr) + sizeof(struct ak60211s_hdr);
-
 	/* ak60211_pkt_hex_dump(skb, "ak60211_frame unencap(1)", 0); */
 
 	memcpy(pos + ETH_ALEN * 2, skb->data + plchdrsize - 2, 2);
@@ -573,7 +577,8 @@ void ak60211_plcto8023_unencap(struct ak60211_if_data *ifmsh,
 	skb->protocol = eth_type_trans(skb, skb->dev);
 
 	skb_reset_network_header(skb);
-
+	skb_set_transport_header(skb, 20);
+	skb->ip_summed = CHECKSUM_UNNECESSARY;
 	ak60211_pkt_hex_dump(skb, "ak60211_frame unencap(2)", 0);
 }
 
@@ -677,18 +682,21 @@ int ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 	struct plc_packet_union plcpkts;
 	int skip_header_bytes, head_need;
 	int ret;
-	u16 ethertype, hdrlen = sizeof(struct ethhdr) + sizeof(struct plc_hdr) + sizeof(struct ak60211s_hdr);
+	u16 ethertype;
+	u16	hdrlen = sizeof(struct ethhdr) +
+				 sizeof(struct plc_hdr) +
+				 sizeof(struct ak60211s_hdr);
 	__le16 fc = 0;
 	bool multicast;
 
 	if (!ifmsh->hmc_ops)
 		goto resolved_failed;
 
-	/* ak60211_pkt_hex_dump(skb, "ak60211_nexthop_resolved(ORI)", 0); */
 	ethertype = (skb->data[12] << 8) | skb->data[13];
 	memcpy(&plcpkts, skb->data, sizeof(struct ethhdr));
 	fc = cpu_to_le16(AK60211_FTYPE_DATA |
 					AK60211_STYPE_QOSDATA);
+	/* ak60211_pkt_hex_dump(skb, "ak60211_nexthop_resolved(ORI)", 0); */
 
 	mpath = ak60211_mpath_lookup(ifmsh, skb->data);
 	if (!mpath || !(mpath->flags & PLC_MESH_PATH_ACTIVE))
@@ -764,7 +772,6 @@ int ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 	plcpkts.plchdr.framectl = fc;
 	plcpkts.plchdr.duration_id = 0;
 	plcpkts.un.meshhdr.ethtype = ntohs(ethertype);
-
 	skip_header_bytes = ETH_HLEN;
 
 	/*
@@ -781,21 +788,30 @@ int ak60211_nexthop_resolved(struct sk_buff *skb, u8 iface_id)
 	head_need = hdrlen - skb_headroom(skb);
 
 	if (head_need > 0 || skb_cloned(skb)) {
+		bool expand = false;
+
 		plc_info("cloned\n");
 		head_need += 2; /* sdata->encrypt_headroom */
 		head_need += 2; /* local->tx_headroom */
 		head_need = max_t(int, 0, head_need);
-		if (pskb_expand_head(skb, head_need, 0, GFP_ATOMIC)) {
-			plc_err("pskb_expand failed\n");
-			dev_kfree_skb_any(skb);
-			skb = NULL;
-			return -ENOMEM;
+
+		if (skb_cloned(skb) && !skb_clone_writable(skb, ETH_HLEN))
+			expand = true;
+		else if (head_need)
+			expand = true;
+
+		if (expand) {
+			if (pskb_expand_head(skb, head_need, 0, GFP_ATOMIC)) {
+				plc_err("pskb_expand failed\n");
+				dev_kfree_skb_any(skb);
+				skb = NULL;
+				return -ENOMEM;
+			}
 		}
 	}
 
 	memcpy(skb_push(skb, hdrlen), &plcpkts, hdrlen);
 	skb_reset_mac_header(skb);
-
 	ak60211_pkt_hex_dump(skb, "ak60211_nexthop_resolved(PLC)", 0);
 	if (!ak60211_mesh_nexthop_lookup(ifmsh, skb)) {
 		ifmsh->hmc_ops->xmit(skb, iface_id);
@@ -870,6 +886,10 @@ int ak60211_rx_handler(struct sk_buff *pskb, struct sk_buff *nskb)
 		/* not muitlcast or zero ether addr */
 		goto drop;
 	}
+
+	/*if (plcbuff->ethtype == 0x0800 || plcbuff->ethtype == 0x0008)
+		if (!EN_PLC_ENCAP)
+			ak60211_pkt_hex_dump(pskb, "ak60211_rx", 0); */
 
 	if (ether_addr_equal(plcbuff->sa, plcdev.addr)) {
 		plc_err("send by myself, drop the packet\n");
