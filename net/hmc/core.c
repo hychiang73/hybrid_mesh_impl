@@ -40,6 +40,10 @@ static struct kmem_cache *hmc_fdb_cache __read_mostly;
 static u32 fdb_salt __read_mostly;
 struct hmc_core *hmc = NULL;
 
+static int hmc_wlan_path_resolve(struct sk_buff *skb, u8 *addr);
+static int hmc_plc_path_resolve(struct sk_buff *skb, u8 *addr);
+static void hmc_tx_skb_queue(struct sk_buff *skb);
+
 struct hmc_core *to_get_hmc(void)
 {
 	return hmc;
@@ -250,17 +254,9 @@ struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 
 	hmc_convert_da_to_wmac(addr, wmac);
 
-	for (i = 0; i < HMC_HASH_SIZE; i++) {
-		hlist_for_each_entry_rcu(f, &hmc->hash[i], hlist) {
-			if (ether_addr_equal(f->addr, addr) ||
-				ether_addr_equal(f->addr, wmac)) {
-				if (f->iface_id == HMC_PORT_PLC)
-					plc = f;
-				else if (f->iface_id == HMC_PORT_WIFI)
-					wlan = f;
-			}
-		}
-	}
+	plc = hmc_fdb_lookup(addr, HMC_PORT_PLC);
+
+	wlan = hmc_fdb_lookup(wmac, HMC_PORT_WIFI);
 
 	if (!plc && !wlan)
 		return NULL;
@@ -284,7 +280,7 @@ struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 int hmc_path_fwd(struct sk_buff *skb)
 {
 	struct hmc_fdb_entry *f;
-	const unsigned char *dest = eth_hdr(skb)->h_dest;
+	unsigned char *dest = eth_hdr(skb)->h_dest;
 
 	if (skb->pkt_type != PACKET_OTHERHOST)
 		return NF_DROP;
@@ -294,13 +290,14 @@ int hmc_path_fwd(struct sk_buff *skb)
 
 	f = hmc_fdb_lookup_best(dest);
 	if (!f) {
-		hmc_err("Can't find addr from hmc tbl");
+		hmc_err("Can't find addr from hmc tbl, resolving ...");
+		hmc_wlan_path_resolve(skb, dest);
+		hmc_plc_path_resolve(skb, dest);
 		return NF_DROP;
 	}
 
-	hmc_info("forward data from %s to %s", skb->dev->name, (f->iface_id == 1) ? "eth0" : "mesh0");
-
 	skb_push(skb, ETH_HLEN);
+	hmc_info("## forward DA : %pM , SA : %pM", skb->data, skb->data + ETH_ALEN);
 	hmc_xmit(skb, f->iface_id);
 
 	return NF_ACCEPT;
