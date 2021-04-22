@@ -1211,14 +1211,6 @@ static void ak60211_mesh_housekeeping_timer(struct timer_list *t)
 	queue_work(ifmsh->workqueue, &ifmsh->work);
 }
 
-static inline void ak60211_mplink_timer_set(struct ak60211_sta_info *sta,
-					    u32 timeout)
-{
-	sta->plink_timeout = timeout;
-	mod_timer(&sta->plink_timer, jiffies +
-				msecs_to_jiffies(timeout));
-}
-
 static void ak60211_mesh_wrkq_start(struct ak60211_if_data *ifmsh)
 {
 	PLC_TRACE();
