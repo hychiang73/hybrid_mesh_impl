@@ -977,7 +977,7 @@ void ak60211_mesh_rx_plink_frame(struct ak60211_if_data *ifmsh,
 
 		sta->plid = plid;
 	} else if (!sta && event == OPN_RJCT) {
-		ak60211_mesh_plink_frame_tx(ifmsh, WLAN_SP_MESH_PEERING_OPEN,
+		ak60211_mesh_plink_frame_tx(ifmsh, WLAN_SP_MESH_PEERING_CLOSE,
 					    buff->plchdr.machdr.h_addr4,
 					    0, plid);
 	}
