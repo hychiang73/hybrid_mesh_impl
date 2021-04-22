@@ -248,8 +248,7 @@ struct hmc_fdb_entry *hmc_fdb_lookup(const u8 *addr, u16 iface_id)
 
 struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 {
-	int i;
-	struct hmc_fdb_entry *f = NULL, *plc = NULL, *wlan = NULL;
+	struct hmc_fdb_entry *plc = NULL, *wlan = NULL;
 	u8 wmac[ETH_ALEN] = {0};
 
 	hmc_convert_da_to_wmac(addr, wmac);
