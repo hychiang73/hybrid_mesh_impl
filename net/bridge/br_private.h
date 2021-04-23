@@ -169,6 +169,13 @@ struct net_bridge_fdb_entry
 #define MDB_PG_FLAGS_PERMANENT	BIT(0)
 #define MDB_PG_FLAGS_OFFLOAD	BIT(1)
 
+/*
+ * struct net_bridge_hmc_ops - callback from bridge to hybrid mesh core
+ */
+struct net_bridge_hmc_ops {
+	int (*fwd)(struct sk_buff *skb);
+};
+
 struct net_bridge_port_group {
 	struct net_bridge_port		*port;
 	struct net_bridge_port_group __rcu *next;
@@ -277,6 +284,7 @@ struct net_bridge
 	spinlock_t			lock;
 	struct list_head		port_list;
 	struct net_device		*dev;
+	const struct net_bridge_hmc_ops *hmc_ops;
 
 	struct pcpu_sw_netstats		__percpu *stats;
 	spinlock_t			hash_lock;
@@ -450,6 +458,8 @@ static inline bool br_vlan_should_use(const struct net_bridge_vlan *v)
 }
 
 /* br_device.c */
+int br_dev_hmc_ops_register(struct net_device *dev, const struct net_bridge_hmc_ops *ops);
+void br_dev_hmc_ops_unregister(struct net_device *dev);
 void br_dev_setup(struct net_device *dev);
 void br_dev_delete(struct net_device *dev, struct list_head *list);
 netdev_tx_t br_dev_xmit(struct sk_buff *skb, struct net_device *dev);

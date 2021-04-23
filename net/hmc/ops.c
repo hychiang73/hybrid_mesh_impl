@@ -80,7 +80,6 @@ int hmc_ops_fdb_dump(struct nl60211_mesh_info *info, int size)
 	return 0;
 }
 
-
 int hmc_ops_fdb_lookup(struct hmc_fdb_entry *f, const u8 *addr, u16 id)
 {
 	struct hmc_fdb_entry *tmp;
@@ -113,8 +112,6 @@ int hmc_ops_fdb_insert(const u8 *addr, u16 id)
 
 int hmc_ops_xmit(struct sk_buff *skb, int egress)
 {
-	hmc_dbg("xmit = (%d, %s)\n", egress, (egress == HMC_PORT_PLC) ? "PLC" : "WIFI");
-
 	return hmc_xmit(skb, egress);
 }
 
@@ -136,6 +133,20 @@ int hmc_ops_fdb_del(const u8 *addr, u16 id)
 	return hmc_fdb_del(addr, id);
 }
 
+int hmc_ops_check_port(int port)
+{
+	return hmc_check_port_state(port);
+}
+
+int hmc_ops_fwd(struct sk_buff *skb)
+{
+	return hmc_path_fwd(skb);
+}
+
+static const struct net_bridge_hmc_ops br_hmc_ops = {
+	.fwd = hmc_ops_fwd,
+};
+
 static const struct mac80211_hmc_ops mac_hmc_ops = {
 	.path_update = hmc_ops_wifi_path_update,
 	.path_del = hmc_ops_wifi_path_del,
@@ -150,7 +161,18 @@ static const struct ak60211_hmc_ops ak_hmc_ops = {
 	.fdb_del = hmc_ops_fdb_del,
 	.fdb_dump = hmc_ops_fdb_dump,
 	.fdb_lookup = hmc_ops_fdb_lookup,
+	.check_port = hmc_ops_check_port,
 };
+
+static int hmc_ops_br_register(struct net_device *dev)
+{
+	return br_dev_hmc_ops_register(dev, &br_hmc_ops);
+}
+
+static void hmc_ops_br_unregister(struct net_device *dev)
+{
+	br_dev_hmc_ops_unregister(dev);
+}
 
 static int hmc_ops_mac_register(struct net_device *dev)
 {
@@ -184,7 +206,10 @@ int hmc_ops_init(struct hmc_core *hmc)
 {
 	hmc_info("hybrid mesh ops init\n");
 
-	if (hmc_ops_mac_register(hmc->wdev))
+	if (hmc_ops_br_register(hmc->bdev) != 0)
+		return -ENODEV;
+
+	if (hmc_ops_mac_register(hmc->wdev) != 0)
 		return -ENODEV;
 
 	if (hmc_ops_ak_register() < 0)
@@ -197,6 +222,7 @@ void hmc_ops_deinit(struct hmc_core *hmc)
 {
 	hmc_info("hybrid mesh ops deinit\n");
 
+	hmc_ops_br_unregister(hmc->bdev);
 	hmc_ops_mac_unregister(hmc->wdev);
 	hmc_ops_ak_unregister();
 }

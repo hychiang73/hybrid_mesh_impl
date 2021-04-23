@@ -1,3 +1,10 @@
+* v0.5
+  * [HMC] wifi mesh forwarding based on hmc decision
+  * [NL60211] Update commands and remove redundant files
+  * [AK60211] Fix ip_summer issue while testing with iperf
+  * [AK60211] Fix peering error when OPN_RJT occurs
+  * [Others] Add bootup script
+---
 * v0.4
   * [HMC] Fix queued & dequeued skb problem
   * [HMC] Fix getting wrong destination address from proxy table in wifi mesh

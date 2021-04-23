@@ -376,6 +376,32 @@ static struct device_type br_type = {
 	.name	= "bridge",
 };
 
+int br_dev_hmc_ops_register(struct net_device *dev, const struct net_bridge_hmc_ops *ops)
+{
+	struct net_bridge *br = netdev_priv(dev);
+
+	if (!br)
+		return -1;
+
+	if (!ops->fwd)
+		return -1;
+
+	br->hmc_ops = ops;
+	return 0;
+}
+EXPORT_SYMBOL(br_dev_hmc_ops_register);
+
+void br_dev_hmc_ops_unregister(struct net_device *dev)
+{
+	struct net_bridge *br = netdev_priv(dev);
+
+	if (!br)
+		return;
+
+	br->hmc_ops = NULL;
+}
+EXPORT_SYMBOL(br_dev_hmc_ops_unregister);
+
 void br_dev_setup(struct net_device *dev)
 {
 	struct net_bridge *br = netdev_priv(dev);
@@ -418,4 +444,6 @@ void br_dev_setup(struct net_device *dev)
 	br_netfilter_rtable_init(br);
 	br_stp_timer_init(br);
 	br_multicast_init(br);
+
+	br->hmc_ops = NULL;
 }

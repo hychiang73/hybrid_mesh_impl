@@ -190,6 +190,10 @@ int br_handle_frame_finish(struct net *net, struct sock *sk, struct sk_buff *skb
 		break;
 	case BR_PKT_UNICAST:
 		dst = __br_fdb_get(br, dest, vid);
+		if (br->hmc_ops && !local_rcv){
+			if (br->hmc_ops->fwd(skb) == NF_ACCEPT)
+			goto out;
+		}
 	default:
 		break;
 	}

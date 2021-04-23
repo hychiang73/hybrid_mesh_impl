@@ -18,8 +18,8 @@
 
 //#define HMC_DBG
 
-#define HMC_VERSION 			"0.4"
-#define EN_PLC_ENCAP			1
+#define HMC_VERSION 			"0.5"
+#define EN_PLC_ENCAP			0
 #define HMC_SKB_QUEUE_LEN		10
 #define HMC_HASH_BITS			8
 #define HMC_MAX_NODES			16
@@ -100,6 +100,7 @@ struct hmc_core {
 };
 
 /* core.c */
+int hmc_check_port_state(int port);
 int hmc_convert_da_to_wmac(const u8 *da, u8 *wmac);
 struct mesh_path *hmc_wpath_lookup(const u8 *addr);
 struct mesh_path *hmc_wpath_mpp_lookup(const u8 *dst);
@@ -109,6 +110,7 @@ struct hmc_fdb_entry *hmc_fdb_insert(const u8 *addr, u16 iface_id);
 struct hmc_fdb_entry *hmc_fdb_lookup(const u8 *addr, u16 iface_id);
 struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr);
 void hmc_path_update(u8 *dst, u32 metric, u32 sn, int flags, int id);
+int hmc_path_fwd(struct sk_buff *skb);
 int hmc_fdb_del(const u8 *addr, u16 iface_id);
 int hmc_xmit(struct sk_buff *skb, int egress);
 int hmc_br_tx_handler(struct sk_buff *skb);

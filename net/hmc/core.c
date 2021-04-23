@@ -40,6 +40,10 @@ static struct kmem_cache *hmc_fdb_cache __read_mostly;
 static u32 fdb_salt __read_mostly;
 struct hmc_core *hmc = NULL;
 
+static int hmc_wlan_path_resolve(struct sk_buff *skb, u8 *addr);
+static int hmc_plc_path_resolve(struct sk_buff *skb, u8 *addr);
+static void hmc_tx_skb_queue(struct sk_buff *skb);
+
 struct hmc_core *to_get_hmc(void)
 {
 	return hmc;
@@ -52,7 +56,7 @@ static inline int hmc_mac_hash(const u8 *mac, u16 iface_id)
 	return jhash_2words(key, iface_id, fdb_salt) & (HMC_HASH_SIZE - 1);
 }
 
-static int hmc_check_port_state(int port)
+int hmc_check_port_state(int port)
 {
 	struct net_bridge_port *p;
 
@@ -63,8 +67,6 @@ static int hmc_check_port_state(int port)
 
 	if (!p)
 		return -ENODEV;
-
-	hmc_dbg("port (%s) state = %d", p->dev->name, p->state);
 
 	if (p->state == BR_STATE_FORWARDING)
 		return 0;
@@ -111,6 +113,8 @@ static void fdb_flush_tx_pending(struct hmc_fdb_entry *fdb)
 			fdb_discard_frame(skb);
 			continue;
 		}
+
+		hmc_info("### dequeue egress : %d", egress);
 
 		if (egress == HMC_PORT_PLC && EN_PLC_ENCAP)
 			ak60211_nexthop_resolved(skb, egress);
@@ -244,23 +248,14 @@ struct hmc_fdb_entry *hmc_fdb_lookup(const u8 *addr, u16 iface_id)
 
 struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 {
-	int i;
-	struct hmc_fdb_entry *f = NULL, *plc = NULL, *wlan = NULL;
+	struct hmc_fdb_entry *plc = NULL, *wlan = NULL;
 	u8 wmac[ETH_ALEN] = {0};
 
 	hmc_convert_da_to_wmac(addr, wmac);
 
-	for (i = 0; i < HMC_HASH_SIZE; i++) {
-		hlist_for_each_entry_rcu(f, &hmc->hash[i], hlist) {
-			if (ether_addr_equal(f->addr, addr) ||
-				ether_addr_equal(f->addr, wmac)) {
-				if (f->iface_id == HMC_PORT_PLC)
-					plc = f;
-				else if (f->iface_id == HMC_PORT_WIFI)
-					wlan = f;
-			}
-		}
-	}
+	plc = hmc_fdb_lookup(addr, HMC_PORT_PLC);
+
+	wlan = hmc_fdb_lookup(wmac, HMC_PORT_WIFI);
 
 	if (!plc && !wlan)
 		return NULL;
@@ -279,6 +274,32 @@ struct hmc_fdb_entry *hmc_fdb_lookup_best(const u8 *addr)
 		}
 		return wlan;
 	}
+}
+
+int hmc_path_fwd(struct sk_buff *skb)
+{
+	struct hmc_fdb_entry *f;
+	unsigned char *dest = eth_hdr(skb)->h_dest;
+
+	if (skb->pkt_type != PACKET_OTHERHOST)
+		return NF_DROP;
+
+	if (!is_unicast_ether_addr(dest))
+		return NF_DROP;
+
+	f = hmc_fdb_lookup_best(dest);
+	if (!f) {
+		hmc_err("Can't find addr from hmc tbl, resolving ...");
+		hmc_wlan_path_resolve(skb, dest);
+		hmc_plc_path_resolve(skb, dest);
+		return NF_DROP;
+	}
+
+	skb_push(skb, ETH_HLEN);
+	hmc_info("## forward DA : %pM , SA : %pM", skb->data, skb->data + ETH_ALEN);
+	hmc_xmit(skb, f->iface_id);
+
+	return NF_ACCEPT;
 }
 
 void hmc_path_update(u8 *dst, u32 metric, u32 sn, int flags, int id)
@@ -325,7 +346,7 @@ int hmc_convert_da_to_wmac(const u8 *da, u8 *wmac)
 	if (mppath)
 		memcpy(wmac, mppath->mpp, ETH_ALEN);
 	else if (mpath)
-		memcpy(wmac, mppath->dst, ETH_ALEN);
+		memcpy(wmac, mpath->dst, ETH_ALEN);
 	else
 		memcpy(wmac, da, ETH_ALEN);
 
@@ -526,7 +547,7 @@ int hmc_xmit(struct sk_buff *skb, int egress)
 		if (egress == HMC_PORT_FLOOD ||
 			(egress == HMC_PORT_PLC && (strncmp(p->dev->name, "eth0", strlen("eth0")) == 0)) ||
 			(egress == HMC_PORT_WIFI &&(strncmp(p->dev->name, "mesh0", strlen("mesh0")) == 0))) {
-			hmc_dbg("forward to %s\n", p->dev->name);
+			hmc_dbg("xmit port : %s\n", p->dev->name);
 			//hmc_print_skb(skb, "hmc_xmit");
 			skb->dev = p->dev;
 			dev_queue_xmit(skb);
@@ -543,11 +564,7 @@ int hmc_br_tx_handler(struct sk_buff *skb)
 
 	skb_reset_mac_header(skb);
 
-	//hmc_print_skb(skb, "hmc_br_tx_handler");
-
 	memcpy(dest, skb->data, ETH_ALEN);
-
-	hmc_dbg("tx dst: %pM\n", dest);
 
 	if (!is_valid_ether_addr(dest))
 		return NF_DROP;
@@ -586,7 +603,7 @@ int hmc_br_rx_handler(struct sk_buff *skb)
 	if (ether_addr_equal(source, hmc->br_addr))
 		return 1;
 
-	hmc_dbg("received from %pM (%s)", skb->data, skb->dev->name);
+	//hmc_dbg("received from %s", skb->dev->name);
 	//hmc_print_skb(skb, "hmc_rx_handler");
 
 	/* SNAP data might be inside 802.3 frames even if coming from wifi egress. */
