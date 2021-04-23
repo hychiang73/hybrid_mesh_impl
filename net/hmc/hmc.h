@@ -18,7 +18,7 @@
 
 //#define HMC_DBG
 
-#define HMC_VERSION 			"0.4"
+#define HMC_VERSION 			"0.5"
 #define EN_PLC_ENCAP			0
 #define HMC_SKB_QUEUE_LEN		10
 #define HMC_HASH_BITS			8
